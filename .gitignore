@@ -12,6 +12,10 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 .mypy_cache/
+.fallow/
+
+# node (web tooling is run via npx / pre-commit-managed envs; nothing committed)
+node_modules/
 
 # coverage
 .coverage

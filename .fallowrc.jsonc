@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+
+  // The browser app is loaded via <script src="app.js"> in index.html, so once
+  // the inline <script> is extracted (see docs/web-tooling.md), app.js is the
+  // single entry point. Until that extraction lands this file does not exist
+  // yet and fallow simply reports "no entry points" and exits clean.
+  //
+  // fallow's dead-code graph (unused files/exports/circular deps) only becomes
+  // meaningful if app.js is later split into several native ES modules. As a
+  // single flat browser script it has no import graph, so the value you get
+  // today is the duplication + complexity passes.
+  "entry": ["app.js"],
+
+  "duplicates": {
+    // Small codebase: report every duplicate pair, not just widespread clones.
+    "minOccurrences": 2
+  },
+
+  "rules": {}
+}
