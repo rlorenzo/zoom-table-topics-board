@@ -17,6 +17,7 @@ colors:
   muted: "#54656d"
   faint: "#8a979d"
   primary-tint: "#e7eef3"
+  primary-tint-2: "#cfe0ea"
   accent-deep: "#6b560f"
   accent-tint: "#fbf4d4"
   danger: "#772432"
