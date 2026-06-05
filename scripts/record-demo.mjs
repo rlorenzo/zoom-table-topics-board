@@ -1,8 +1,8 @@
 // Record a short demo clip of the Table Topics board and write docs/demo.webm.
 //
-// It boots its own board server in demo mode, drives the full flow with
-// Playwright (welcome -> demo -> roll -> spotlight reveal -> focus -> done),
-// and records the page via Chrome's screencast, so the real animations are
+// It boots its own board server, seeds the sample meeting, and drives the flow
+// with Playwright (board with topics -> roll -> spotlight reveal -> focus ->
+// done), recording the page via Chrome's screencast, so the real animations are
 // captured rather than stitched from screenshots. Playwright records VP8, so we
 // transcode the capture to a smaller VP9 .webm with ffmpeg.
 //
@@ -63,43 +63,37 @@ async function recordWebm(dir) {
     reducedMotion: "no-preference",
     recordVideo: { dir, size: SIZE },
   });
+  // Skip the first-run welcome: mark this browser onboarded before any app
+  // script runs, so the clip opens straight on the board with topics listed.
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem("tabletopics.onboarded.v1", "1");
+    } catch {
+      /* private mode */
+    }
+  });
   const page = await context.newPage();
 
-  // Start from a clean first run: no saved flag, no leftover demo.
+  // The demo meeting is seeded server-side before recording, so the first frame
+  // is the board with sample topics and the roster.
   await page.goto(BASE);
-  await page.evaluate(async () => {
-    localStorage.clear();
-    await fetch("/api/demo/stop", { method: "POST" });
-  });
-  await page.reload();
-
-  // 1. First-run welcome.
-  await page.waitForSelector("#welcome:not([hidden])");
-  await wait(1900);
-
-  // 2. Load the sample meeting.
-  await page.click("#demoStartBtn");
   await page.waitForSelector("#demoBar:not([hidden])");
-  await wait(1500);
+  await wait(2000);
 
-  // 3. Roll a participant and let the spotlight reveal land.
+  // 1. Roll a participant and let the spotlight reveal land.
   await page.click("#pickBtn");
   await page.waitForSelector("#shuffleName.settled", { timeout: 6000 });
   await wait(1800);
 
-  // 4. Hand them a topic -> the name morphs into the focus hero.
+  // 2. Hand them a topic -> the name morphs into the focus hero.
   await page.click("#pickTopicsHost .card.choose");
   await page.waitForSelector("#focus:not([hidden])");
   await wait(2800);
 
-  // 5. Mark done -> celebration, back to the board.
+  // 3. Mark done -> celebration, back to the board on a completed turn.
   await page.click("#focusDoneBtn");
   await page.waitForSelector("#board:not([hidden])");
-  await wait(1700);
-
-  // 6. Exit the demo back to a clean slate.
-  await page.click("#demoExitBtn");
-  await wait(1100);
+  await wait(2200);
 
   const video = page.video();
   await context.close();
@@ -138,6 +132,8 @@ async function main() {
   const tmp = await mkdtemp(join(tmpdir(), "ttdemo-"));
   try {
     await waitForServer(`${BASE}/`);
+    // Seed the sample meeting before recording so the first frame shows topics.
+    await fetch(`${BASE}/api/demo/start`, { method: "POST" });
     console.log("recording demo flow...");
     const webm = await recordWebm(tmp);
     console.log("transcoding to VP9...");
