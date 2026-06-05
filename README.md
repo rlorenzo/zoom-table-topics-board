@@ -143,8 +143,14 @@ Front-end checks and the demo recorder use Node:
 npm install
 npm test                          # vitest unit tests
 npm run check                     # lint + html-validate + coverage + dead code
-npx playwright install chromium   # one-time, for the recorder
 npm run record:demo               # rewrites docs/demo.webm from a scripted run
+```
+
+The recorder also needs Chromium and ffmpeg available once:
+
+```bash
+npx playwright install chromium   # records the flow
+brew install ffmpeg               # transcodes the capture to VP9 (or apt/choco)
 ```
 
 ## Credits

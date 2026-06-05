@@ -3,16 +3,16 @@
 // It boots its own board server in demo mode, drives the full flow with
 // Playwright (welcome -> demo -> roll -> spotlight reveal -> focus -> done),
 // and records the page via Chrome's screencast, so the real animations are
-// captured rather than stitched from screenshots. Playwright writes WebM
-// natively, so there's no transcode step.
+// captured rather than stitched from screenshots. Playwright records VP8, so we
+// transcode the capture to a smaller VP9 .webm with ffmpeg.
 //
 //   npm run record:demo
 //
-// Dev-only: playwright is a devDependency. Run once after install:
-// `npx playwright install chromium`.
+// Needs: `npx playwright install chromium` (once) and ffmpeg on PATH
+// (macOS: `brew install ffmpeg`).
 
 import { spawn } from "node:child_process";
-import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,6 +39,20 @@ async function waitForServer(url, timeoutMs = 15000) {
     await wait(250);
   }
   throw new Error(`server did not start at ${url}`);
+}
+
+function run(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, { stdio: "inherit" });
+    p.on("error", (err) => {
+      if (err.code === "ENOENT") {
+        reject(new Error(`${cmd} not found on PATH. Install it (macOS: brew install ${cmd}).`));
+      } else {
+        reject(err);
+      }
+    });
+    p.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`))));
+  });
 }
 
 async function recordWebm(dir) {
@@ -93,6 +107,29 @@ async function recordWebm(dir) {
   return video.path();
 }
 
+async function toVp9(src) {
+  // CRF VP9 (constant quality, -b:v 0) is well suited to a flat-color, text-heavy
+  // screencast and meaningfully smaller than the VP8 capture. yuv420p keeps it
+  // broadly playable; row multithreading speeds the encode up.
+  await run("ffmpeg", [
+    "-y",
+    "-i",
+    src,
+    "-an",
+    "-c:v",
+    "libvpx-vp9",
+    "-crf",
+    "32",
+    "-b:v",
+    "0",
+    "-pix_fmt",
+    "yuv420p",
+    "-row-mt",
+    "1",
+    OUT,
+  ]);
+}
+
 async function main() {
   const server = spawn("uv", ["run", "board.py", "--no-ax", "--port", String(PORT)], {
     cwd: ROOT,
@@ -103,7 +140,8 @@ async function main() {
     await waitForServer(`${BASE}/`);
     console.log("recording demo flow...");
     const webm = await recordWebm(tmp);
-    await copyFile(webm, OUT);
+    console.log("transcoding to VP9...");
+    await toVp9(webm);
     console.log(`wrote ${OUT}`);
   } finally {
     server.kill("SIGTERM");
