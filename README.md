@@ -1,74 +1,101 @@
-# Table Topics Board
+# Table Topics
 
-A live webpage for running **Table Topics** in a meeting. It reads the Zoom
-Participants panel automatically (macOS and Windows), rolls a random
-participant who hasn't gone yet, and lets you assign them a prompt — then
-shows that prompt full-screen for the room. Screen-share the page so everyone
-sees who's up and what they've been asked.
+Run **Table Topics** in a video meeting from one local command. The board reads
+your Zoom Participants panel automatically, rolls a random person who has not
+gone yet, and lets you hand them a prompt. The prompt then fills the screen for
+the whole room. Screen-share the browser tab and everyone sees who is up and
+what they have been asked.
 
-One process, one command. No Node, no Zoom account, no credentials.
+One process, one command. No Node, no Zoom account, no credentials, nothing
+saved on a server.
 
-## Run it
+<p align="center">
+  <img src="docs/reveal.png" alt="A spotlight finds the chosen speaker" width="860">
+</p>
+<p align="center"><em>Hit "Pick next participant" and the room rolls to a name
+under a warm spotlight.</em></p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/board.png" alt="The host's control board" width="100%"><br>
+      <em>The host's control board: a calm, light surface to queue people and prompts.</em>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/focus.png" alt="A topic prompt filling the screen" width="100%"><br>
+      <em>The chosen prompt fills the screen for the whole room to read.</em>
+    </td>
+  </tr>
+</table>
+
+## Quick start
 
 ```bash
 uv sync
 uv run board.py
 ```
 
-Open <http://localhost:3000> and screen-share that browser tab.
+Open <http://localhost:3000> and screen-share that browser tab. That is the
+whole setup.
 
-- On macOS with Accessibility granted, or on Windows with the UIA backend
-  installed, it auto-reads Zoom's Participants panel every few seconds and
+- On **macOS** (with Accessibility granted) or **Windows** (with the bundled
+  UIA backend), the board reads Zoom's Participants panel every few seconds and
   fills the roster for you.
-- Anywhere else (or without permission) it runs in manual-only mode: type
-  names in yourself. The webpage is identical either way.
+- **Anywhere else**, or without permission, it runs in manual mode: type names
+  in yourself. The board looks and works the same either way.
 
 ## How it works
 
-1. **Build your topics.** Add a prompt (a headline plus optional details), one
-   at a time or pasted in as a block. Topics also live in your browser, so a
-   reload or your next meeting pre-fills them — nothing is saved on a server
-   and nothing is shared automatically.
-2. **Pick someone.** Hit *Pick next participant*. The board rolls a random
-   person who hasn't answered yet (the host is skipped by default — you're
-   running it). Don't like the draw? Pick again.
-3. **Hand them a topic.** Click an open topic. It locks to that person and the
-   screen goes full-screen: their name, the prompt, and any details.
-4. **Done.** When they finish, hit *Done*. The topic grays out with their name,
-   and you're back on the board to pick the next person.
+1. **Build your topics.** Add a prompt (a headline plus optional details), one at
+   a time or pasted in as a block. Topics are saved in your browser, so a reload
+   or your next meeting pre-fills them. Nothing is stored on a server, and
+   nothing is shared automatically.
+2. **Pick someone.** Hit *Pick next participant*. The board rolls a random person
+   who has not answered yet (the host is skipped by default, since you are
+   running it). Do not like the draw? Pick again.
+3. **Hand them a topic.** Click an open topic, or hit *Surprise me* for a
+   Press-Your-Luck spin that lands on a random one. The topic locks to that
+   person and the screen goes full-screen with their name, the prompt, and any
+   details, sized to read from across the room.
+4. **Mark it done.** When they finish, hit *Done*. The topic grays out with their
+   name, and you are back on the board to pick the next person.
 
-State lives for the meeting only. *Reset* clears assignments and starts a fresh
-round with the same topics.
+State lives for the meeting only. *New round* clears assignments and starts a
+fresh round with the same topics and roster.
 
-## Auto-reading Zoom (macOS)
+## Auto-reading Zoom on macOS
 
-Auto-read needs pyobjc and macOS Accessibility permission. Install via
-[uv](https://docs.astral.sh/uv/):
+Auto-read uses pyobjc and the macOS Accessibility permission. Both are installed
+by `uv sync`. Then:
 
-```bash
-uv sync
-```
+1. Grant Accessibility permission to the app you run this **from** (Terminal or
+   iTerm), in **System Settings > Privacy & Security > Accessibility**.
+2. Reopen that terminal so the new permission takes effect.
+3. Start your meeting, open the Participants panel, then run `uv run board.py`.
 
-Grant Accessibility permission to the app you run this FROM (Terminal or
-iTerm), in System Settings > Privacy & Security > Accessibility, then reopen
-that terminal. Start a meeting, open the Participants panel, then run
-`uv run board.py`.
-
-Zoom's accessibility tree is undocumented and changes between versions, so if
-names do not appear, tune the matcher:
+Zoom's accessibility tree is undocumented and shifts between versions, so if names
+do not appear, tune the matcher:
 
 ```bash
 uv run board.py --anchor-regex 'participants|attendees' --debug
 ```
 
-Known limitations: virtualized participant lists may only expose names that
-are currently scrolled into view, and dial-in users sometimes appear as phone
-numbers rather than names.
+Known limits: virtualized participant lists may only expose the names currently
+scrolled into view, and dial-in callers sometimes show up as phone numbers.
 
-## Auto-reading Zoom (Windows)
+## Auto-reading Zoom on Windows
 
-Auto-read on Windows uses UI Automation via the `uiautomation` package, which
-`uv sync` installs automatically. No extra permission prompt is required.
+Windows auto-read uses UI Automation via the `uiautomation` package, which
+`uv sync` installs for you. No extra permission prompt is needed.
+
+## Manual mode (no setup)
+
+Want to skip Zoom reading entirely, or running somewhere without the
+accessibility backend? Add people by hand and pass `--no-ax`:
+
+```bash
+uv run board.py --no-ax
+```
 
 ## CLI flags
 
@@ -78,9 +105,17 @@ Auto-read on Windows uses UI Automation via the `uiautomation` package, which
 | `--interval` | `5.0` | Seconds between Zoom panel reads |
 | `--no-ax` | off | Manual entry only; never read Zoom |
 | `--anchor-regex` | `participant` | Regex that locates the participants subtree |
-| `--exclude` | — | Extra comma-separated terms to drop from names |
+| `--exclude` | (none) | Extra comma-separated terms to drop from names |
 | `--min-len` | `2` | Minimum length for a string to count as a name |
 | `--debug` | off | Print reader diagnostics to stderr |
+
+## Design
+
+The board is styled to match the **Toastmasters International** brand (Loyal
+Blue, Happy Yellow, Montserrat and Source Sans 3), so it feels at home in a club
+meeting. It is not an official Toastmasters product and does not use the
+Toastmasters logo. The visual system is documented in
+[`DESIGN.md`](DESIGN.md); the product direction lives in [`PRODUCT.md`](PRODUCT.md).
 
 ## Development
 
@@ -92,8 +127,8 @@ uv run mypy            # type-check (strict)
 uv run pre-commit run --all-files
 ```
 
-## Credit
+## Credits
 
-The Zoom-reading engine (accessibility scraping, name cleaning, host
-detection, and the HTTP + Server-Sent-Events server pattern) is shared in
-spirit with its sibling project, the Zoom Icebreaker tracker.
+The Zoom-reading engine (accessibility scraping, name cleaning, host detection,
+and the HTTP plus Server-Sent-Events server pattern) is shared in spirit with its
+sibling project, the [Zoom Icebreaker tracker](https://github.com/rlorenzo/zoom-icebreaker).
