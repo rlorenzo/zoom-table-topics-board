@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Table Topics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper:     #faf7f2;
+    --surface:   #f3eee5;
+    --hairline:  #ddd3c2;
+    --soft-line: #c8bca6;
+    --muted-ink: #807666;
+    --dim-ink:   #4a4036;
+    --ink:       #28201a;
+    --clay:      #c9573a;
+    --clay-deep: #a44128;
+
+    --rounded-xs: 6px;
+    --rounded-sm: 10px;
+    --rounded-md: 14px;
+
+    --t-fast:   140ms cubic-bezier(0.22, 1, 0.36, 1);
+    --t-medium: 200ms cubic-bezier(0.22, 1, 0.36, 1);
+
+    font-family: "Geist", "Inter", system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* The `hidden` attribute must always win over a class's display rule —
+     the view containers (.stage/.focus) set display:flex, which would
+     otherwise override [hidden] and leave the focus overlay covering the
+     board when no topic is active. */
+  [hidden] { display: none !important; }
+
+  html, body { background: var(--paper); }
+  body {
+    color: var(--ink);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+  }
+
+  button { font-family: inherit; }
+
+  .wrap { max-width: 980px; margin: 0 auto; padding: 5vh 5vw; }
+
+  /* ============================================================= BOARD */
+  /* Header --------------------------------------------------------- */
+  header { margin-bottom: 28px; }
+
+  .meta {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 14px;
+    font-size: 0.8125rem; color: var(--muted-ink);
+  }
+  .meta b { color: var(--dim-ink); font-weight: 500; }
+  .meta .sep { color: var(--hairline); }
+
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--clay); flex: none;
+    box-shadow: 0 0 0 0 rgba(201, 87, 58, .45);
+    animation: pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  }
+  .dot.stale { background: var(--soft-line); animation: none; box-shadow: none; }
+  @keyframes pulse {
+    70% { box-shadow: 0 0 0 9px rgba(201, 87, 58, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(201, 87, 58, 0); }
+  }
+
+  .titlebar {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; margin-top: 18px;
+  }
+  h1.app-title {
+    font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+
+  /* Primary CTA --------------------------------------------------- */
+  .cta {
+    font-family: inherit;
+    font-size: 0.9375rem; font-weight: 600;
+    letter-spacing: 0.01em;
+    padding: 13px 22px;
+    border-radius: var(--rounded-sm);
+    border: 1px solid var(--clay-deep);
+    background: var(--clay); color: #fff;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 9px;
+    transition: background var(--t-fast), border-color var(--t-fast),
+                transform var(--t-fast), opacity var(--t-fast);
+    flex: none;
+  }
+  .cta:hover { background: var(--clay-deep); border-color: var(--clay-deep); }
+  .cta:active { transform: translateY(1px); }
+  .cta:focus-visible { outline: 2px solid var(--clay); outline-offset: 3px; }
+  .cta:disabled {
+    background: var(--surface); color: var(--soft-line);
+    border-color: var(--hairline);
+    cursor: not-allowed;
+  }
+  .cta .dice { width: 17px; height: 17px; }
+
+  .cta-hint {
+    font-size: 0.8125rem; color: var(--muted-ink);
+    margin-top: 8px; text-align: right;
+  }
+
+  /* Stats ---------------------------------------------------------- */
+  .stats {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: 10px; margin: 24px 0 30px;
+  }
+  .stat {
+    background: var(--surface);
+    border-radius: var(--rounded-sm);
+    padding: 14px 16px;
+  }
+  .stat .n {
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-size: 1.875rem; font-weight: 500;
+    line-height: 1; letter-spacing: -0.01em;
+    font-feature-settings: 'tnum' 1;
+    color: var(--ink);
+  }
+  .stat .l {
+    margin-top: 9px;
+    font-size: 0.6875rem; font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--muted-ink);
+  }
+
+  /* Section heads -------------------------------------------------- */
+  .section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px; margin: 0 0 14px;
+  }
+  .section-head h2 {
+    font-size: 0.8125rem; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted-ink);
+  }
+  .section-head .aux {
+    font-size: 0.8125rem; color: var(--muted-ink);
+  }
+
+  /* Topic grid ----------------------------------------------------- */
+  .topics {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px; margin-bottom: 14px;
+  }
+
+  .card {
+    position: relative;
+    display: flex; flex-direction: column;
+    text-align: left;
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+    border-radius: var(--rounded-md);
+    padding: 16px 18px 14px;
+    min-height: 116px;
+    transition: border-color var(--t-fast), background var(--t-fast),
+                box-shadow var(--t-fast), transform var(--t-medium);
+  }
+
+  /* Open cards in PICKING mode are big clickable buttons. */
+  button.card {
+    width: 100%; font: inherit; color: inherit; cursor: default;
+  }
+  button.card.choose {
+    cursor: pointer;
+  }
+  button.card.choose:hover {
+    border-color: var(--clay);
+    box-shadow: 0 4px 16px -8px rgba(164, 65, 40, 0.5);
+    transform: translateY(-2px);
+  }
+  button.card.choose:focus-visible {
+    outline: 2px solid var(--clay); outline-offset: 3px;
+  }
+
+  .card .status-tag {
+    display: inline-flex; align-items: center; gap: 6px;
+    align-self: flex-start;
+    font-size: 0.625rem; font-weight: 600;
+    letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--muted-ink);
+    margin-bottom: 9px;
+  }
+  .card .status-tag .ic { width: 12px; height: 12px; }
+
+  .card .hl {
+    font-size: 1.0625rem; font-weight: 600;
+    line-height: 1.25; letter-spacing: -0.01em;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+  }
+  .card .dt {
+    margin-top: 7px;
+    font-size: 0.875rem; line-height: 1.45;
+    color: var(--dim-ink);
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+
+  /* open */
+  .card.open .status-tag { color: var(--clay); }
+
+  /* active (rare on the board; the focus view normally takes over) */
+  .card.active {
+    border-color: var(--clay);
+    background: oklch(96% 0.018 38);
+  }
+  .card.active .status-tag { color: var(--clay-deep); }
+
+  /* done — grayed + locked */
+  .card.done {
+    background: var(--surface);
+    border-color: var(--hairline);
+  }
+  .card.done .hl { color: var(--dim-ink); }
+  .card.done .status-tag { color: var(--muted-ink); }
+  .card.done .assignee { color: var(--muted-ink); }
+
+  /* picking: non-open cards read as unavailable */
+  .card.locked-out { opacity: 0.5; }
+
+  .card .assignee {
+    margin-top: auto; padding-top: 10px;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 0.8125rem; color: var(--dim-ink);
+  }
+  .card .assignee .who { font-weight: 500; }
+  .card .assignee .ic { width: 13px; height: 13px; color: var(--muted-ink); flex: none; }
+
+  /* per-card affordances (edit / remove / reopen) */
+  .card-tools {
+    position: absolute; top: 10px; right: 10px;
+    display: flex; gap: 2px;
+    opacity: 0;
+    transition: opacity var(--t-fast);
+  }
+  .card:hover .card-tools,
+  .card:focus-within .card-tools { opacity: 1; }
+  .card-tools .tool {
+    background: var(--paper); border: 1px solid var(--hairline);
+    color: var(--muted-ink);
+    width: 26px; height: 26px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: var(--rounded-xs); cursor: pointer;
+    transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+  }
+  .card-tools .tool:hover { color: var(--ink); border-color: var(--soft-line); background: var(--surface); }
+  .card-tools .tool.danger:hover { color: var(--clay-deep); }
+  .card-tools .tool:focus-visible { outline: 2px solid var(--clay); outline-offset: 1px; }
+  .card-tools .tool svg { width: 13px; height: 13px; }
+  .card.done .card-tools { opacity: 1; }
+
+  .reopen-link {
+    margin-top: 10px;
+    align-self: flex-start;
+    background: none; border: 0; padding: 4px 0;
+    font-size: 0.75rem; font-weight: 500; letter-spacing: 0.03em;
+    color: var(--muted-ink); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+    border-radius: var(--rounded-xs);
+    transition: color var(--t-fast);
+  }
+  .reopen-link:hover { color: var(--clay-deep); }
+  .reopen-link:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+  .reopen-link svg { width: 12px; height: 12px; }
+
+  /* Add topics ----------------------------------------------------- */
+  /* Topic editor is tucked at the bottom behind a toggle. ----------- */
+  .add-section { margin: 30px 0 8px; }
+  .add-toggle {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: none; border: 1px dashed var(--soft-line);
+    color: var(--muted-ink);
+    font-size: 0.8125rem; font-weight: 500; letter-spacing: 0.02em;
+    padding: 9px 16px; border-radius: var(--rounded-sm);
+    cursor: pointer;
+    transition: border-color var(--t-fast), color var(--t-fast);
+  }
+  .add-toggle:hover { border-color: var(--clay); color: var(--ink); }
+  .add-toggle:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+  .add-toggle[aria-expanded="true"] { border-style: solid; color: var(--ink); }
+  .add-toggle-ic {
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-size: 1.0625rem; line-height: 1;
+    transition: transform var(--t-fast);
+  }
+  .add-toggle[aria-expanded="true"] .add-toggle-ic { transform: rotate(45deg); }
+
+  .add-area {
+    background: var(--surface);
+    border-radius: var(--rounded-md);
+    padding: 18px 20px;
+    margin: 12px 0 8px;
+  }
+  .add-tabs { display: flex; gap: 4px; margin-bottom: 14px; }
+  .add-tab {
+    background: none; border: 0; cursor: pointer;
+    font-size: 0.8125rem; font-weight: 500; letter-spacing: 0.02em;
+    color: var(--muted-ink);
+    padding: 6px 12px; border-radius: 999px;
+    transition: background var(--t-fast), color var(--t-fast);
+  }
+  .add-tab:hover { color: var(--ink); }
+  .add-tab.on { background: var(--paper); color: var(--ink); }
+  .add-tab:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+
+  .single-form { display: flex; flex-direction: column; gap: 10px; }
+  .single-form .row1 { display: flex; gap: 10px; }
+  .single-form .row1 input { flex: 1; }
+  .single-form textarea { min-height: 0; }
+
+  input, textarea {
+    font-family: inherit; font-size: 0.9375rem;
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+    padding: 11px 14px; border-radius: var(--rounded-xs);
+    width: 100%; min-width: 0;
+    transition: border-color var(--t-fast);
+  }
+  input::placeholder, textarea::placeholder { color: var(--muted-ink); }
+  input:focus, textarea:focus { outline: none; border-color: var(--clay); }
+  textarea { resize: vertical; line-height: 1.5; }
+
+  .paste-form { display: flex; flex-direction: column; gap: 10px; }
+  .paste-form textarea { min-height: 130px; font-size: 0.875rem; }
+  .paste-hint {
+    font-size: 0.75rem; color: var(--muted-ink); line-height: 1.5;
+  }
+  .paste-hint code {
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-size: 0.75rem; background: var(--paper);
+    padding: 1px 5px; border-radius: 4px;
+    border: 1px solid var(--hairline);
+  }
+
+  .form-actions {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .form-actions .spacer { flex: 1; }
+  .form-actions label.repl {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 0.8125rem; color: var(--muted-ink); cursor: pointer;
+  }
+
+  .btn {
+    font-family: inherit;
+    font-size: 0.8125rem; font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 10px 16px;
+    border-radius: var(--rounded-xs);
+    border: 1px solid var(--ink);
+    background: var(--ink); color: var(--paper);
+    cursor: pointer;
+    transition: background var(--t-fast), border-color var(--t-fast),
+                color var(--t-fast), opacity var(--t-fast);
+  }
+  .btn:hover { background: var(--dim-ink); border-color: var(--dim-ink); }
+  .btn:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn.ghost {
+    background: var(--paper); color: var(--dim-ink);
+    border-color: var(--hairline);
+  }
+  .btn.ghost:hover { background: var(--surface); color: var(--ink); border-color: var(--soft-line); }
+  .btn.quiet {
+    background: none; color: var(--muted-ink); border-color: transparent;
+    padding: 10px 10px;
+  }
+  .btn.quiet:hover { background: var(--surface); color: var(--clay-deep); border-color: transparent; }
+
+  /* Empty topic state --------------------------------------------- */
+  .topic-empty {
+    border: 1px dashed var(--soft-line);
+    border-radius: var(--rounded-md);
+    padding: 40px 32px;
+    text-align: center;
+    margin-bottom: 18px;
+  }
+  .topic-empty h3 {
+    font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em;
+    color: var(--ink); margin-bottom: 8px;
+  }
+  .topic-empty p { color: var(--muted-ink); max-width: 38ch; margin: 0 auto; }
+  .topic-empty .btn { margin-top: 18px; }
+
+  /* Roster (secondary) -------------------------------------------- */
+  .roster-section { margin-top: 38px; }
+  .roster {
+    display: flex; flex-wrap: wrap; gap: 8px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    padding: 6px 8px 6px 13px;
+    transition: border-color var(--t-fast), background var(--t-fast);
+  }
+  .chip.answered { background: var(--surface); border-color: var(--hairline); }
+  .chip.left { opacity: 0.55; }
+  .chip .pick-name {
+    background: none; border: 0; padding: 0; cursor: pointer;
+    font: inherit; font-size: 0.875rem; font-weight: 500;
+    color: var(--ink);
+    display: inline-flex; align-items: center; gap: 7px;
+    border-radius: var(--rounded-xs);
+  }
+  .chip.answered .pick-name { color: var(--muted-ink); }
+  .chip .pick-name:hover { color: var(--clay-deep); }
+  .chip .pick-name:disabled { cursor: default; }
+  .chip .pick-name:disabled:hover { color: inherit; }
+  .chip .pick-name:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+  .chip .state-ic { width: 13px; height: 13px; flex: none; }
+  .chip .state-ic.present { color: var(--clay); }
+  .chip .state-ic.done { color: var(--muted-ink); }
+  .chip.left .state-ic { color: var(--soft-line); }
+  .chip .host-pill {
+    font-size: 0.625rem; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: lowercase;
+    color: var(--clay);
+  }
+  .chip .x {
+    background: none; border: 0; padding: 3px;
+    color: var(--soft-line); cursor: pointer;
+    display: inline-flex; align-items: center;
+    border-radius: 50%;
+    transition: color var(--t-fast), background var(--t-fast);
+  }
+  .chip .x:hover { color: var(--clay-deep); background: var(--surface); }
+  .chip .x:focus-visible { outline: 2px solid var(--clay); outline-offset: 1px; }
+
+  .roster-add {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 14px; max-width: 360px;
+  }
+
+  .empty {
+    color: var(--muted-ink); padding: 28px 0;
+    text-align: center; font-size: 0.9375rem;
+    border: 1px dashed var(--hairline);
+    border-radius: var(--rounded-sm);
+  }
+
+  /* Footer --------------------------------------------------------- */
+  footer {
+    margin-top: 40px; padding-top: 20px;
+    border-top: 1px solid var(--hairline);
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  footer .spacer { flex: 1; }
+  footer .note { font-size: 0.75rem; color: var(--muted-ink); }
+
+  /* ====================================================== PICKING view */
+  .stage {
+    position: fixed; inset: 0; z-index: 50;
+    background: var(--paper);
+    display: flex; flex-direction: column;
+    padding: 4vh 5vw;
+  }
+
+  .stage-top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 14px;
+    font-size: 0.8125rem; color: var(--muted-ink);
+  }
+  .stage-top .meta { margin: 0; }
+
+  .stage-mid {
+    flex: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    gap: 18px;
+    min-height: 0;
+  }
+
+  .shuffle-label {
+    font-size: 0.875rem; font-weight: 500;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted-ink);
+  }
+  .shuffle-name {
+    font-size: clamp(2.75rem, 9vw, 6.5rem);
+    font-weight: 700; line-height: 1.0;
+    letter-spacing: -0.03em;
+    color: var(--ink);
+    max-width: 16ch;
+    overflow-wrap: anywhere;
+  }
+  .shuffle-name.cycling { color: var(--muted-ink); }
+  .shuffle-name.settled {
+    color: var(--ink);
+  }
+  @keyframes name-pop {
+    0%   { transform: scale(0.92); }
+    55%  { transform: scale(1.06); }
+    100% { transform: scale(1); }
+  }
+  .shuffle-name.flourish { animation: name-pop 460ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+  .spark {
+    font-size: clamp(1.5rem, 4vw, 2.5rem);
+    line-height: 1;
+    opacity: 0;
+    transition: opacity var(--t-medium);
+  }
+  .spark.show { opacity: 1; }
+
+  .pick-banner {
+    font-size: clamp(1.125rem, 2.4vw, 1.6rem);
+    font-weight: 500; color: var(--dim-ink);
+    line-height: 1.3;
+    opacity: 0;
+    transition: opacity var(--t-medium);
+  }
+  .pick-banner.show { opacity: 1; }
+  .pick-banner b { color: var(--ink); font-weight: 700; }
+
+  .pick-choices {
+    width: 100%; max-width: 980px;
+    opacity: 0; pointer-events: none;
+    transition: opacity var(--t-medium);
+  }
+  .pick-choices.show { opacity: 1; pointer-events: auto; }
+  .pick-choices .topics { margin: 0; }
+
+  .stage-actions {
+    display: flex; align-items: center; justify-content: center;
+    gap: 12px; flex-wrap: wrap;
+    padding-top: 6px;
+  }
+
+  /* ======================================================== FOCUS view */
+  .focus {
+    position: fixed; inset: 0; z-index: 60;
+    background: var(--paper);
+    display: flex; flex-direction: column;
+    padding: 5vh 6vw;
+  }
+  .focus-who {
+    font-size: clamp(1.25rem, 3vw, 2rem);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--clay-deep);
+    margin-bottom: 3vh;
+  }
+  .focus-who .label {
+    display: block;
+    font-size: 0.8125rem; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted-ink);
+    margin-bottom: 8px;
+  }
+  .focus-body {
+    flex: 1;
+    display: flex; flex-direction: column; justify-content: center;
+    min-height: 0;
+  }
+  .focus-headline {
+    font-size: clamp(2.5rem, 7vw, 6rem);
+    font-weight: 700; line-height: 1.04;
+    letter-spacing: -0.03em;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+  }
+  .focus-details {
+    margin-top: 3.5vh;
+    font-size: clamp(1.125rem, 2.6vw, 1.9rem);
+    font-weight: 400; line-height: 1.4;
+    letter-spacing: -0.005em;
+    color: var(--dim-ink);
+    max-width: 28ch;
+    overflow-wrap: anywhere;
+  }
+  .focus-actions {
+    display: flex; align-items: center; gap: 16px;
+    margin-top: 4vh;
+  }
+  .focus-done {
+    font-size: 1.0625rem; font-weight: 600;
+    padding: 16px 32px;
+    border-radius: var(--rounded-sm);
+    border: 1px solid var(--clay-deep);
+    background: var(--clay); color: #fff;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 10px;
+    transition: background var(--t-fast), transform var(--t-fast);
+  }
+  .focus-done:hover { background: var(--clay-deep); }
+  .focus-done:active { transform: translateY(1px); }
+  .focus-done:focus-visible { outline: 2px solid var(--clay); outline-offset: 3px; }
+  .focus-done svg { width: 19px; height: 19px; }
+  .focus-back {
+    font-size: 0.9375rem; font-weight: 500;
+    background: none; border: 0; padding: 10px 6px;
+    color: var(--muted-ink); cursor: pointer;
+    border-radius: var(--rounded-xs);
+    transition: color var(--t-fast);
+  }
+  .focus-back:hover { color: var(--dim-ink); }
+  .focus-back:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+
+  /* Reduced motion ------------------------------------------------- */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+    .dot { animation: none; box-shadow: none; }
+    /* reveal the staged elements instantly */
+    .pick-banner, .pick-choices, .spark { transition: none; }
+  }
+
+  /* Narrow screens ------------------------------------------------- */
+  @media (max-width: 720px) {
+    .stats { grid-template-columns: repeat(3, 1fr); }
+    .stats .stat:nth-child(4), .stats .stat:nth-child(5) { grid-column: span 1; }
+    .titlebar { flex-direction: column; align-items: stretch; }
+    .cta-hint { text-align: left; }
+  }
+  @media (max-width: 520px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .single-form .row1 { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================ BOARD (default) ============================ -->
+<div class="wrap" id="board">
+  <header>
+    <div class="meta">
+      <span class="dot" id="liveDot" aria-hidden="true"></span>
+      <span id="live">live</span>
+      <span class="sep" aria-hidden="true">·</span>
+      <span>Started <b id="since">··</b></span>
+    </div>
+    <div class="titlebar">
+      <h1 class="app-title">Table Topics</h1>
+      <div>
+        <button class="cta" id="pickBtn" type="button">
+          <svg class="dice" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="3"/>
+            <circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" stroke="none"/>
+            <circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/>
+            <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>
+          </svg>
+          <span>Pick next participant</span>
+        </button>
+        <div class="cta-hint" id="pickHint"></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="stats" aria-label="Counts">
+    <div class="stat"><div class="n" id="s-togo">0</div><div class="l">Still to go</div></div>
+    <div class="stat"><div class="n" id="s-answered">0</div><div class="l">Answered</div></div>
+    <div class="stat"><div class="n" id="s-room">0</div><div class="l">In the room</div></div>
+    <div class="stat"><div class="n" id="s-tdone">0</div><div class="l">Topics done</div></div>
+    <div class="stat"><div class="n" id="s-ttotal">0</div><div class="l">Topics total</div></div>
+  </div>
+
+  <main aria-live="polite">
+    <div class="section-head">
+      <h2>Topics</h2>
+      <span class="aux" id="topicsAux"></span>
+    </div>
+    <div id="topicsHost"></div>
+
+    <div class="roster-section">
+      <div class="section-head">
+        <h2>In the room</h2>
+        <span class="aux">Click a name to hand them a topic</span>
+      </div>
+      <div class="roster" id="roster"></div>
+      <form class="roster-add" id="rosterAddForm" autocomplete="off">
+        <input id="rosterAddName" placeholder="Add someone manually&hellip;" aria-label="Add participant by name" />
+        <button class="btn ghost" type="submit">Add</button>
+      </form>
+    </div>
+
+    <div class="add-section">
+      <button class="add-toggle" id="addToggle" type="button" aria-expanded="false" aria-controls="addArea">
+        <span class="add-toggle-ic" id="addToggleIc" aria-hidden="true">+</span>
+        <span id="addToggleLabel">Add or edit topics</span>
+      </button>
+      <div class="add-area" id="addArea" hidden>
+        <div class="add-tabs" role="tablist" aria-label="How to add topics">
+          <button class="add-tab on" id="tabSingle" role="tab" aria-selected="true" type="button">Add one</button>
+          <button class="add-tab" id="tabPaste" role="tab" aria-selected="false" type="button">Paste many</button>
+        </div>
+
+        <form class="single-form" id="singleForm" autocomplete="off">
+          <div class="row1">
+            <input id="hl" placeholder="Topic headline&hellip;" aria-label="Topic headline" maxlength="160" />
+          </div>
+          <textarea id="dt" rows="2" placeholder="Details (optional)&hellip;" aria-label="Topic details" maxlength="600"></textarea>
+          <div class="form-actions">
+            <div class="spacer"></div>
+            <button class="btn" type="submit">Add topic</button>
+          </div>
+        </form>
+
+        <form class="paste-form" id="pasteForm" autocomplete="off" hidden>
+          <textarea id="pasteBox" aria-label="Paste many topics, one per line"
+            placeholder="One topic per line&#10;Use a pipe for details:&#10;&#10;What's a small win this week? | Keep it under a minute&#10;Describe your ideal weekend"></textarea>
+          <div class="paste-hint">
+            One topic per line. Add details after a <code>|</code> &mdash; e.g.
+            <code>Headline | optional details</code>. Nothing is saved on the server.
+          </div>
+          <div class="form-actions">
+            <label class="repl"><input type="checkbox" id="pasteReplace" style="width:auto" /> Replace existing topics</label>
+            <div class="spacer"></div>
+            <button class="btn" type="submit">Add topics</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <span class="note">Topics are remembered in this browser only &mdash; participants and matching reset when you stop.</span>
+    <div class="spacer"></div>
+    <button class="btn quiet" id="clearTopicsBtn" type="button">Clear topics</button>
+    <button class="btn ghost" id="resetBtn" type="button">New round</button>
+  </footer>
+</div>
+
+<!-- ============================ PICKING ============================ -->
+<div class="stage" id="stage" hidden>
+  <div class="stage-top">
+    <div class="meta">
+      <span class="dot" id="liveDot2" aria-hidden="true"></span>
+      <span id="live2">live</span>
+    </div>
+    <span id="stagePool"></span>
+  </div>
+  <div class="stage-mid">
+    <div class="shuffle-label" id="shuffleLabel">Rolling&hellip;</div>
+    <div class="shuffle-name" id="shuffleName" aria-live="off">&nbsp;</div>
+    <div class="spark" id="spark" aria-hidden="true">&#10024;</div>
+    <div class="pick-banner" id="pickBanner" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div class="pick-choices" id="pickChoices">
+      <div class="section-head"><h2>Pick their topic</h2></div>
+      <div id="pickTopicsHost"></div>
+    </div>
+  </div>
+  <div class="stage-actions" id="stageActions">
+    <button class="btn ghost" id="pickAgainBtn" type="button">Pick someone else</button>
+    <button class="btn quiet" id="pickCancelBtn" type="button">Cancel</button>
+  </div>
+</div>
+
+<!-- ============================ FOCUS ============================ -->
+<div class="focus" id="focus" hidden>
+  <div class="focus-who">
+    <span class="label">Up now</span>
+    <span id="focusName">&nbsp;</span>
+  </div>
+  <div class="focus-body">
+    <div class="focus-headline" id="focusHeadline">&nbsp;</div>
+    <div class="focus-details" id="focusDetails" hidden></div>
+  </div>
+  <div class="focus-actions">
+    <button class="focus-done" id="focusDoneBtn" type="button">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>
+      <span>Done</span>
+    </button>
+    <button class="focus-back" id="focusBackBtn" type="button">Back</button>
+  </div>
+</div>
+
+<script>
+  // ---- icons (inline so a single file ships) -----------------------
+  const ICON_X = `<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>`;
+  const ICON_EDIT = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5l2.5 2.5M9.5 4L3 10.5V13h2.5L12 6.5z"/></svg>`;
+  const ICON_TRASH = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5h10M6 4.5V3h4v1.5M5 4.5l.6 8h4.8l.6-8"/></svg>`;
+  const ICON_REOPEN = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8a5 5 0 1 1 1.5 3.5M3 8V5M3 8h3"/></svg>`;
+  const ICON_DONE = `<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>`;
+  const ICON_PERSON = `<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="5" r="2.5"/><path d="M3.5 13a4.5 4.5 0 0 1 9 0"/></svg>`;
+  const ICON_DOT = `<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="currentColor"/></svg>`;
+  const ICON_OPEN = `<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="8" cy="8" r="4.5"/></svg>`;
+
+  // ---- formatters --------------------------------------------------
+  const fmtTime = ts =>
+    new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  const $ = id => document.getElementById(id);
+  const reduceMotion = () =>
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---- API ---------------------------------------------------------
+  async function post(url, body) {
+    return fetch(url, {
+      method: "POST",
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  // ---- state cache -------------------------------------------------
+  let state = {
+    startedAt: Date.now(),
+    participants: [],
+    topics: [],
+    selected: null,
+    activeTopicId: null,
+  };
+
+  // ---- localStorage: the host's topic set (no server persistence) --
+  const LS_KEY = "tabletopics.topics.v1";
+  let seededThisLoad = false;
+
+  function loadStoredTopics() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return [];
+      return arr
+        .map(t => ({
+          headline: String(t && t.headline || "").trim(),
+          details: String(t && t.details || "").trim(),
+        }))
+        .filter(t => t.headline);
+    } catch { return []; }
+  }
+  function saveStoredTopics(topics) {
+    try {
+      const slim = topics.map(t => ({ headline: t.headline, details: t.details || "" }));
+      localStorage.setItem(LS_KEY, JSON.stringify(slim));
+    } catch { /* private mode / quota — non-fatal */ }
+  }
+  function clearStoredTopics() {
+    try { localStorage.removeItem(LS_KEY); } catch { /* ignore */ }
+  }
+
+  // ====================================================================
+  //  RENDER  — derive the active view purely from snapshot state.
+  //    activeTopicId != null  -> FOCUS
+  //    selected != null       -> PICKING
+  //    else                   -> BOARD
+  // ====================================================================
+  function render(s) {
+    const prev = state;
+    state = s;
+
+    // Mirror the live indicator into both header / stage copies.
+    // (set elsewhere by the EventSource handlers)
+
+    const view = s.activeTopicId ? "focus" : s.selected ? "picking" : "board";
+
+    $("board").hidden = view !== "board";
+    $("stage").hidden = view !== "picking";
+    $("focus").hidden = view !== "focus";
+
+    // Leaving picking: tear down any in-flight reveal so re-picking the same
+    // person later (e.g. after Cancel) still triggers a fresh shuffle.
+    if (view !== "picking") {
+      clearShuffle();
+      lastSelectedId = null;
+      revealActive = false;
+    }
+
+    if (view === "board")        renderBoard(s);
+    else if (view === "picking") renderPicking(s, prev);
+    else                         renderFocus(s);
+
+    // Persist the topic set whenever it changes, and one-time re-seed
+    // from localStorage if the server starts empty.
+    syncTopicStorage(s);
+  }
+
+  // ---- topic localStorage sync + one-time re-seed ------------------
+  function syncTopicStorage(s) {
+    const serverTopics = s.topics.map(t => ({ headline: t.headline, details: t.details || "" }));
+
+    if (!seededThisLoad) {
+      // First snapshot this page load. If the server is empty, re-seed it once
+      // from whatever this browser remembered; otherwise adopt the server set.
+      seededThisLoad = true; // guard before the async call to avoid loops
+      if (serverTopics.length === 0) {
+        const stored = loadStoredTopics();
+        if (stored.length > 0) {
+          post("/api/topics", { topics: stored, replace: false });
+        }
+        return; // don't clobber the cache mid-reseed
+      }
+    }
+
+    // After the initial seed, mirror the server's set on every snapshot —
+    // INCLUDING when it becomes empty — so deleting the last topic isn't
+    // resurrected from a stale cache on the next reload.
+    saveStoredTopics(serverTopics);
+  }
+
+  // ---- topic card markup (shared by board + picking choices) -------
+  function topicCard(t, opts) {
+    opts = opts || {};
+    const choose = !!opts.choose && t.status === "open";
+    const lockedOut = !!opts.pickMode && t.status !== "open";
+
+    const statusTag =
+      t.status === "done"
+        ? `<span class="status-tag">${ICON_DONE}Done</span>`
+        : t.status === "active"
+        ? `<span class="status-tag">${ICON_DOT}On now</span>`
+        : `<span class="status-tag">${ICON_OPEN}Open</span>`;
+
+    // The extra detail is a surprise: it stays hidden on open cards (the board
+    // and the picking choices) with no hint it exists, and only appears once
+    // the topic is chosen — in the full-screen focus view, and afterward on the
+    // done/active card.
+    const details = t.details && t.status !== "open"
+      ? `<div class="dt">${escapeHtml(t.details)}</div>`
+      : "";
+
+    let assigneeBlock = "";
+    if (t.assignee) {
+      assigneeBlock =
+        `<div class="assignee">${ICON_PERSON}<span class="who">${escapeHtml(t.assignee.name)}</span></div>`;
+    }
+
+    // Per-card affordances. Open cards (board only) get edit + remove.
+    // Done cards get a reopen link. None of these render in pick "choose" mode.
+    let tools = "";
+    let reopen = "";
+    if (!opts.pickMode) {
+      if (t.status === "open") {
+        tools =
+          `<div class="card-tools">` +
+            `<button class="tool" type="button" data-act="edit" data-tid="${t.id}" aria-label="Edit topic">${ICON_EDIT}</button>` +
+            `<button class="tool danger" type="button" data-act="remove-topic" data-tid="${t.id}" aria-label="Remove topic">${ICON_TRASH}</button>` +
+          `</div>`;
+      }
+      if (t.status === "done" || t.status === "active") {
+        reopen =
+          `<button class="reopen-link" type="button" data-act="reopen" data-tid="${t.id}">${ICON_REOPEN}<span>Reopen</span></button>`;
+      }
+    }
+
+    const cls = ["card", t.status, choose ? "choose" : "", lockedOut ? "locked-out" : ""]
+      .filter(Boolean).join(" ");
+
+    const inner =
+      statusTag +
+      `<div class="hl">${escapeHtml(t.headline)}</div>` +
+      details +
+      assigneeBlock +
+      reopen;
+
+    if (choose) {
+      // A real button so it's keyboard-operable; click assigns the topic.
+      return `<button class="${cls}" type="button" data-act="assign" data-tid="${t.id}">${inner}</button>`;
+    }
+    // Static card (board open/active/done, or picking locked-out).
+    return `<div class="${cls}">${tools}${inner}</div>`;
+  }
+
+  // ============================== BOARD ==============================
+  function renderBoard(s) {
+    $("since").textContent = fmtTime(s.startedAt);
+
+    const present = s.participants.filter(p => p.present);
+    const inRoom = present.length;
+    const answered = present.filter(p => p.answered).length;
+    // Eligible "still to go" mirrors the server pool: present, not answered, not host.
+    const toGo = present.filter(p => !p.answered && !p.is_host).length;
+    const tDone = s.topics.filter(t => t.status === "done").length;
+    const tTotal = s.topics.length;
+
+    $("s-togo").textContent = toGo;
+    $("s-answered").textContent = answered;
+    $("s-room").textContent = inRoom;
+    $("s-tdone").textContent = tDone;
+    $("s-ttotal").textContent = tTotal;
+
+    // ---- topics ----
+    const host = $("topicsHost");
+    const openCount = s.topics.filter(t => t.status === "open").length;
+    $("topicsAux").textContent = tTotal
+      ? `${openCount} open · ${tDone} done`
+      : "";
+
+    if (tTotal === 0) {
+      host.innerHTML =
+        `<div class="topic-empty">
+           <h3>No topics yet</h3>
+           <p>They live only in your browser — add one, or paste a whole list at once.</p>
+           <button class="btn" type="button" data-act="open-add">Add topics</button>
+         </div>`;
+    } else {
+      host.innerHTML =
+        `<div class="topics">${s.topics.map(t => topicCard(t, {})).join("")}</div>`;
+    }
+
+    // ---- roster ----
+    renderRoster(s);
+
+    // ---- primary CTA enable/disable ----
+    const eligible = present.filter(p => !p.answered && !p.is_host).length;
+    const hasOpen = openCount > 0;
+    const btn = $("pickBtn");
+    const hint = $("pickHint");
+    btn.disabled = eligible === 0 || !hasOpen;
+    if (eligible === 0 && tTotal > 0) {
+      hint.textContent = "Everyone has had a topic.";
+    } else if (eligible === 0) {
+      hint.textContent = "Add people to the room first.";
+    } else if (!hasOpen) {
+      hint.textContent = "Add an open topic to pick.";
+    } else {
+      hint.textContent = "";
+    }
+  }
+
+  function renderRoster(s) {
+    const roster = $("roster");
+    if (!s.participants.length) {
+      roster.innerHTML =
+        `<div class="empty" style="width:100%">No one yet. Joins appear automatically, or add someone below.</div>`;
+      return;
+    }
+    roster.innerHTML = s.participants.map(p => {
+      const cls = ["chip", p.answered ? "answered" : "", p.present ? "" : "left"]
+        .filter(Boolean).join(" ");
+      const stateIc = !p.present
+        ? ICON_DOT
+        : p.answered
+        ? `<span class="state-ic done">${ICON_DONE}</span>`
+        : `<span class="state-ic present">${ICON_OPEN}</span>`;
+      const hostPill = p.is_host ? `<span class="host-pill">host</span>` : "";
+      // Clicking a present name manually selects them (host included). Someone
+      // who already had their turn isn't selectable — same one-turn rule as the
+      // random roll, and the server rejects it anyway.
+      const canSelect = p.present && !p.answered;
+      const nameBtn =
+        `<button class="pick-name" type="button" ${canSelect ? "" : "disabled"} data-act="select" data-pid="${p.id}">` +
+          stateIc +
+          `<span class="who">${escapeHtml(p.name)}</span>` +
+          hostPill +
+        `</button>`;
+      const removeBtn =
+        `<button class="x" type="button" data-act="remove-p" data-pid="${p.id}" aria-label="Remove ${escapeHtml(p.name)}">${ICON_X}</button>`;
+      return `<span class="${cls}">${nameBtn}${removeBtn}</span>`;
+    }).join("");
+  }
+
+  // ============================= PICKING =============================
+  let shuffleTimer = null;
+  let shuffleTimeout = null;
+  let lastSelectedId = null;
+  let revealActive = false;
+
+  function clearShuffle() {
+    if (shuffleTimer) { clearInterval(shuffleTimer); shuffleTimer = null; }
+    if (shuffleTimeout) { clearTimeout(shuffleTimeout); shuffleTimeout = null; }
+  }
+
+  function renderPicking(s, prev) {
+    const sel = s.selected;
+    $("stagePool").textContent = "";
+
+    // Render the open topic cards as the choice grid (always reflect state).
+    const choices = s.topics.map(t =>
+      topicCard(t, { pickMode: true, choose: t.status === "open" })).join("");
+    $("pickTopicsHost").innerHTML =
+      s.topics.length
+        ? `<div class="topics">${choices}</div>`
+        : `<div class="empty" style="width:100%">No topics to assign. Cancel and add some first.</div>`;
+
+    // Detect a NEW selection -> play the shuffle reveal.
+    const isNewSelection = sel && sel.id !== lastSelectedId;
+    lastSelectedId = sel ? sel.id : null;
+
+    if (isNewSelection) {
+      startReveal(s, sel);
+    } else if (!revealActive) {
+      // Re-render landing on an already-settled selection (e.g. a topic was
+      // removed while picking) — keep the settled UI without re-shuffling.
+      settleReveal(sel);
+    }
+  }
+
+  // Build the pool of names to flash during the shuffle: currently-eligible
+  // participants (present && !answered && !is_host) from the snapshot.
+  function eligibleNames(s) {
+    return s.participants
+      .filter(p => p.present && !p.answered && !p.is_host)
+      .map(p => p.name);
+  }
+
+  function startReveal(s, sel) {
+    revealActive = true;
+    clearShuffle();
+
+    const nameEl = $("shuffleName");
+    const label = $("shuffleLabel");
+    const spark = $("spark");
+    const banner = $("pickBanner");
+    const choicesBox = $("pickChoices");
+
+    // Reset staged elements.
+    label.textContent = "Rolling…";
+    label.style.visibility = "visible";
+    spark.classList.remove("show");
+    banner.classList.remove("show");
+    choicesBox.classList.remove("show");
+    nameEl.classList.remove("settled", "flourish");
+
+    if (reduceMotion()) {
+      // Skip straight to the settled name — motion is never the only carrier.
+      settleReveal(sel);
+      revealActive = false;
+      return;
+    }
+
+    // Cycle through eligible names rapidly, then settle on the real pick.
+    let pool = eligibleNames(s).filter(n => n); // names only
+    if (!pool.length) pool = [sel.name];
+    nameEl.classList.add("cycling");
+
+    let i = 0;
+    const flash = () => {
+      nameEl.textContent = pool[i % pool.length];
+      i++;
+    };
+    flash();
+    shuffleTimer = setInterval(flash, 70);
+
+    // After ~1s, settle. Keep the handle so a rapid re-pick can cancel it —
+    // an orphaned timeout would settle on the previous person mid-animation.
+    shuffleTimeout = setTimeout(() => {
+      shuffleTimeout = null;
+      clearShuffle();
+      settleReveal(sel);
+      revealActive = false;
+    }, 1000);
+  }
+
+  function settleReveal(sel) {
+    clearShuffle();
+    const nameEl = $("shuffleName");
+    const label = $("shuffleLabel");
+    const spark = $("spark");
+    const banner = $("pickBanner");
+    const choicesBox = $("pickChoices");
+
+    nameEl.classList.remove("cycling");
+    nameEl.classList.add("settled");
+    nameEl.textContent = sel ? sel.name : "";
+    if (!reduceMotion()) {
+      // restart the pop animation
+      nameEl.classList.remove("flourish");
+      void nameEl.offsetWidth;
+      nameEl.classList.add("flourish");
+    }
+    label.textContent = "It's";
+    spark.classList.add("show");
+    banner.innerHTML = sel
+      ? `<b>${escapeHtml(sel.name)}</b> is up — pick their topic`
+      : "";
+    banner.classList.add("show");
+    choicesBox.classList.add("show");
+  }
+
+  // ============================== FOCUS ==============================
+  function renderFocus(s) {
+    const t = s.topics.find(x => x.id === s.activeTopicId);
+    if (!t) return; // snapshot will correct itself
+    const who = t.assignee ? t.assignee.name : "";
+    $("focusName").textContent = who;
+    $("focusHeadline").textContent = t.headline;
+    const dt = $("focusDetails");
+    if (t.details) {
+      dt.textContent = t.details;
+      dt.hidden = false;
+    } else {
+      dt.textContent = "";
+      dt.hidden = true;
+    }
+    // Stash active id on the buttons for the click handlers.
+    $("focusDoneBtn").dataset.tid = t.id;
+    $("focusBackBtn").dataset.tid = t.id;
+  }
+
+  // ====================================================================
+  //  EVENT WIRING
+  // ====================================================================
+
+  // ---- Board: primary CTA + reset + clear --------------------------
+  $("pickBtn").addEventListener("click", () => {
+    if ($("pickBtn").disabled) return;
+    post("/api/pick", {});
+  });
+  $("resetBtn").addEventListener("click", () => {
+    if (confirm("Start a new round? Topics and the roster are kept; everyone becomes eligible again."))
+      post("/api/reset");
+  });
+  $("clearTopicsBtn").addEventListener("click", () => {
+    if (!confirm("Clear all topics? This removes them from the board and your browser.")) return;
+    clearStoredTopics();
+    post("/api/topics", { topics: [], replace: true });
+  });
+
+  // ---- Add-topic tabs ----------------------------------------------
+  function showTab(which) {
+    const single = which === "single";
+    $("tabSingle").classList.toggle("on", single);
+    $("tabPaste").classList.toggle("on", !single);
+    $("tabSingle").setAttribute("aria-selected", String(single));
+    $("tabPaste").setAttribute("aria-selected", String(!single));
+    $("singleForm").hidden = !single;
+    $("pasteForm").hidden = single;
+  }
+  $("tabSingle").addEventListener("click", () => showTab("single"));
+  $("tabPaste").addEventListener("click", () => showTab("paste"));
+
+  // ---- Add-topic editor toggle (collapsed by default) --------------
+  function setAddOpen(open) {
+    $("addArea").hidden = !open;
+    $("addToggle").setAttribute("aria-expanded", String(open));
+    $("addToggleLabel").textContent = open ? "Hide topic editor" : "Add or edit topics";
+  }
+  function openAddEditor() {
+    setAddOpen(true);
+    $("addArea").scrollIntoView({
+      behavior: reduceMotion() ? "auto" : "smooth",
+      block: "nearest",
+    });
+    $("hl").focus();
+  }
+  $("addToggle").addEventListener("click", () => setAddOpen($("addArea").hidden));
+
+  // ---- Add one topic -----------------------------------------------
+  $("singleForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const headline = $("hl").value.trim();
+    if (!headline) { $("hl").focus(); return; }
+    const details = $("dt").value.trim();
+    $("hl").value = ""; $("dt").value = "";
+    $("hl").focus();
+    await post("/api/topic", { headline, details });
+  });
+
+  // ---- Paste many ---------------------------------------------------
+  function parsePaste(text) {
+    return text
+      .split("\n")
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map(line => {
+        const i = line.indexOf("|");
+        if (i === -1) return { headline: line, details: "" };
+        return {
+          headline: line.slice(0, i).trim(),
+          details: line.slice(i + 1).trim(),
+        };
+      })
+      .filter(t => t.headline);
+  }
+  $("pasteForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const topics = parsePaste($("pasteBox").value);
+    const replace = $("pasteReplace").checked;
+    if (!topics.length && !replace) { $("pasteBox").focus(); return; }
+    $("pasteBox").value = "";
+    $("pasteReplace").checked = false;
+    await post("/api/topics", { topics, replace });
+  });
+
+  // ---- Roster: add / select / remove -------------------------------
+  $("rosterAddForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const input = $("rosterAddName");
+    const name = input.value.trim();
+    if (!name) return;
+    input.value = "";
+    await post("/api/participant", { name });
+  });
+
+  // ---- Picking: actions --------------------------------------------
+  $("pickAgainBtn").addEventListener("click", () => {
+    const ex = state.selected ? state.selected.id : null;
+    post("/api/pick", ex ? { exclude: ex } : {});
+  });
+  $("pickCancelBtn").addEventListener("click", () => post("/api/pick/cancel"));
+
+  // ---- Focus: done / back ------------------------------------------
+  $("focusDoneBtn").addEventListener("click", () => {
+    const tid = $("focusDoneBtn").dataset.tid;
+    if (tid) post(`/api/topic/${tid}/done`);
+  });
+  $("focusBackBtn").addEventListener("click", () => {
+    const tid = $("focusBackBtn").dataset.tid;
+    if (tid) post(`/api/topic/${tid}/reopen`);
+  });
+
+  // ---- Global click delegation (topic cards, roster chips) ---------
+  document.addEventListener("click", e => {
+    const t = e.target.closest("[data-act]");
+    if (!t) return;
+    const act = t.dataset.act;
+    const tid = t.dataset.tid;
+    const pid = t.dataset.pid;
+    switch (act) {
+      case "assign":       if (tid) post(`/api/topic/${tid}/assign`); break;
+      case "reopen":       if (tid) post(`/api/topic/${tid}/reopen`); break;
+      case "remove-topic":
+        if (tid && confirm("Remove this topic?")) post(`/api/topic/${tid}/remove`);
+        break;
+      case "edit":         if (tid) editTopic(tid); break;
+      case "select":       if (pid) post("/api/select", { pid }); break;
+      case "remove-p":     if (pid) post(`/api/participant/${pid}/remove`); break;
+      case "open-add":     openAddEditor(); break;
+    }
+  });
+
+  // Inline edit via prompt() — minimal, no modal, matches the calm tone.
+  function editTopic(tid) {
+    const t = state.topics.find(x => x.id === tid);
+    if (!t) return;
+    const headline = window.prompt("Edit topic headline:", t.headline);
+    if (headline === null) return;          // cancelled
+    if (!headline.trim()) return;           // server rejects blank; don't bother
+    const details = window.prompt("Edit details (leave blank for none):", t.details || "");
+    if (details === null) return;           // cancelled on second prompt
+    post(`/api/topic/${tid}/edit`, { headline: headline.trim(), details: details.trim() });
+  }
+
+  // ---- Keyboard: Escape cancels a pick -----------------------------
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if (!$("stage").hidden && state.selected) post("/api/pick/cancel");
+  });
+
+  // ====================================================================
+  //  LIVE STREAM
+  // ====================================================================
+  function setLive(text, stale) {
+    for (const id of ["live", "live2"]) {
+      const el = $(id);
+      if (el) el.textContent = text;
+    }
+    for (const id of ["liveDot", "liveDot2"]) {
+      const el = $(id);
+      if (el) el.classList.toggle("stale", !!stale);
+    }
+  }
+
+  const es = new EventSource("/events");
+  es.onmessage = e => {
+    let snap;
+    try { snap = JSON.parse(e.data); } catch { return; }
+    render(snap);
+  };
+  es.onerror = () => setLive("reconnecting", true);
+  es.onopen  = () => setLive("live", false);
+</script>
+</body>
+</html>
