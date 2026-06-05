@@ -97,6 +97,18 @@ DEFAULT_BUNDLE = "us.zoom.xos"
 DEFAULT_WIN_PROCESS = "Zoom.exe"
 HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX_HTML = os.path.join(HERE, "index.html")
+APP_JS = os.path.join(HERE, "app.js")
+LIB_JS = os.path.join(HERE, "lib.js")
+STYLES_CSS = os.path.join(HERE, "styles.css")
+
+# Static web assets served next to index.html (extracted from the old
+# single-file page). An explicit allowlist — the filesystem path is never
+# derived from the request, so there is no path-traversal surface.
+STATIC_FILES: dict[str, tuple[str, str]] = {
+    "/app.js": (APP_JS, "text/javascript; charset=utf-8"),
+    "/lib.js": (LIB_JS, "text/javascript; charset=utf-8"),
+    "/styles.css": (STYLES_CSS, "text/css; charset=utf-8"),
+}
 
 # --- Name cleaning / filtering --------------------------------------------
 ANNOT = re.compile(
@@ -938,21 +950,32 @@ class Handler(BaseHTTPRequestHandler):
             return True
         return urlparse(origin).netloc == self.headers.get("Host", "")
 
-    def do_GET(self) -> None:
-        if self.path == "/" or self.path.startswith("/index"):
-            try:
-                with open(INDEX_HTML, "rb") as f:
-                    body = f.read()
-            except FileNotFoundError:
-                return self._json(500, {"error": "index.html missing"})
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
+    def _serve_file(self, path: str, ctype: str, missing: tuple[int, str]) -> None:
+        try:
+            with open(path, "rb") as f:
+                body = f.read()
+        except FileNotFoundError:
+            return self._json(missing[0], {"error": missing[1]})
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-        if self.path == "/events":
+    def do_GET(self) -> None:
+        # Route on the path component only, so a query string (e.g. a
+        # cache-buster like /app.js?v=1) still matches the static allowlist.
+        path = urlparse(self.path).path
+        if path == "/" or path.startswith("/index"):
+            return self._serve_file(
+                INDEX_HTML, "text/html; charset=utf-8", (500, "index.html missing")
+            )
+
+        asset = STATIC_FILES.get(path)
+        if asset is not None:
+            return self._serve_file(asset[0], asset[1], (404, "not found"))
+
+        if path == "/events":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")

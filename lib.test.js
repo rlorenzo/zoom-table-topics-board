@@ -1,0 +1,188 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  cardClass,
+  chipClass,
+  clearStoredTopics,
+  eligibleNames,
+  escapeHtml,
+  fmtTime,
+  loadStoredTopics,
+  newlyDoneId,
+  nextView,
+  parsePaste,
+  pickHint,
+  saveStoredTopics,
+  topicAux,
+} from "./lib.js";
+
+const LS_KEY = "tabletopics.topics.v1";
+
+describe("escapeHtml", () => {
+  it("escapes the five HTML-significant characters", () => {
+    expect(escapeHtml(`<a href="x" data-y='z'>&</a>`)).toBe(
+      "&lt;a href=&quot;x&quot; data-y=&#39;z&#39;&gt;&amp;&lt;/a&gt;",
+    );
+  });
+  it("leaves a plain string untouched", () => {
+    expect(escapeHtml("Tell us about your week")).toBe("Tell us about your week");
+  });
+  it("coerces non-strings before escaping", () => {
+    expect(escapeHtml(42)).toBe("42");
+  });
+});
+
+describe("parsePaste", () => {
+  it("treats each non-empty line as a headline", () => {
+    expect(parsePaste("First\nSecond")).toEqual([
+      { headline: "First", details: "" },
+      { headline: "Second", details: "" },
+    ]);
+  });
+  it("splits on the first pipe only", () => {
+    expect(parsePaste("Topic | a | b")).toEqual([{ headline: "Topic", details: "a | b" }]);
+  });
+  it("trims whitespace and drops blank lines", () => {
+    expect(parsePaste("  A  \n\n   \n B | d ")).toEqual([
+      { headline: "A", details: "" },
+      { headline: "B", details: "d" },
+    ]);
+  });
+  it("drops entries with no headline (leading pipe)", () => {
+    expect(parsePaste("| just details")).toEqual([]);
+  });
+  it("returns [] for empty input", () => {
+    expect(parsePaste("")).toEqual([]);
+  });
+});
+
+describe("eligibleNames", () => {
+  it("returns present, unanswered, non-host names in order", () => {
+    const s = {
+      participants: [
+        { name: "Host", present: true, answered: false, is_host: true },
+        { name: "Ann", present: true, answered: false, is_host: false },
+        { name: "Bob", present: true, answered: true, is_host: false },
+        { name: "Cy", present: false, answered: false, is_host: false },
+        { name: "Dee", present: true, answered: false, is_host: false },
+      ],
+    };
+    expect(eligibleNames(s)).toEqual(["Ann", "Dee"]);
+  });
+  it("excludes the host even when otherwise eligible", () => {
+    const s = {
+      participants: [{ name: "Host", present: true, answered: false, is_host: true }],
+    };
+    expect(eligibleNames(s)).toEqual([]);
+  });
+});
+
+describe("topic localStorage", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it("returns [] when nothing is stored", () => {
+    expect(loadStoredTopics()).toEqual([]);
+  });
+
+  it("round-trips a saved set, slimmed to headline/details", () => {
+    saveStoredTopics([{ headline: "A", details: "d", status: "open", id: "x" }, { headline: "B" }]);
+    expect(loadStoredTopics()).toEqual([
+      { headline: "A", details: "d" },
+      { headline: "B", details: "" },
+    ]);
+  });
+
+  it("trims and drops entries without a headline", () => {
+    localStorage.setItem(
+      LS_KEY,
+      JSON.stringify([{ headline: "  Keep  ", details: " yes " }, { headline: "   " }, {}]),
+    );
+    expect(loadStoredTopics()).toEqual([{ headline: "Keep", details: "yes" }]);
+  });
+
+  it("returns [] for malformed JSON", () => {
+    localStorage.setItem(LS_KEY, "{not json");
+    expect(loadStoredTopics()).toEqual([]);
+  });
+
+  it("returns [] when the stored value is not an array", () => {
+    localStorage.setItem(LS_KEY, JSON.stringify({ headline: "x" }));
+    expect(loadStoredTopics()).toEqual([]);
+  });
+
+  it("clearStoredTopics removes the stored set", () => {
+    saveStoredTopics([{ headline: "A", details: "" }]);
+    clearStoredTopics();
+    expect(loadStoredTopics()).toEqual([]);
+  });
+});
+
+describe("fmtTime", () => {
+  it("formats a timestamp as a time string", () => {
+    const out = fmtTime(Date.UTC(2026, 0, 1, 15, 30));
+    expect(typeof out).toBe("string");
+    expect(out).toMatch(/\d/);
+  });
+});
+
+describe("nextView", () => {
+  it("prioritises focus > picking > board", () => {
+    expect(nextView({ activeTopicId: "t", selected: { id: "p" } })).toBe("focus");
+    expect(nextView({ activeTopicId: null, selected: { id: "p" } })).toBe("picking");
+    expect(nextView({ activeTopicId: null, selected: null })).toBe("board");
+  });
+});
+
+describe("newlyDoneId", () => {
+  const open = (id) => ({ id, status: "open" });
+  const done = (id) => ({ id, status: "done" });
+  it("returns the id of the one topic that just became done", () => {
+    expect(newlyDoneId([open("a")], [done("a")])).toBe("a");
+  });
+  it("returns null when nothing newly completed", () => {
+    expect(newlyDoneId([done("a")], [done("a")])).toBeNull();
+  });
+  it("returns null when more than one completed at once", () => {
+    expect(newlyDoneId([open("a"), open("b")], [done("a"), done("b")])).toBeNull();
+  });
+  it("tolerates a missing previous list", () => {
+    expect(newlyDoneId(undefined, [done("a")])).toBe("a");
+  });
+});
+
+describe("pickHint", () => {
+  it("says everyone went when the pool is empty but someone answered", () => {
+    expect(pickHint({ toGo: 0, answered: 3, hasOpen: true })).toBe("Everyone has had a topic.");
+  });
+  it("asks for people when the room is empty", () => {
+    expect(pickHint({ toGo: 0, answered: 0, hasOpen: true })).toBe("Add people to the room first.");
+  });
+  it("asks for a topic when none are open", () => {
+    expect(pickHint({ toGo: 2, answered: 0, hasOpen: false })).toBe("Add an open topic to pick.");
+  });
+  it("is empty when a pick is possible", () => {
+    expect(pickHint({ toGo: 2, answered: 0, hasOpen: true })).toBe("");
+  });
+});
+
+describe("topicAux", () => {
+  it("summarises open/done counts", () => {
+    expect(topicAux({ tTotal: 5, openCount: 3, tDone: 2 })).toBe("3 open · 2 done");
+  });
+  it("is empty with no topics", () => {
+    expect(topicAux({ tTotal: 0, openCount: 0, tDone: 0 })).toBe("");
+  });
+});
+
+describe("cardClass / chipClass", () => {
+  it("builds a card class, dropping empty parts", () => {
+    expect(cardClass("open", false, false)).toBe("card open");
+    expect(cardClass("open", true, false)).toBe("card open choose");
+    expect(cardClass("done", false, true)).toBe("card done locked-out");
+  });
+  it("builds a chip class from participant flags", () => {
+    expect(chipClass({ answered: true, present: true })).toBe("chip answered");
+    expect(chipClass({ answered: false, present: false })).toBe("chip left");
+    expect(chipClass({ answered: false, present: true })).toBe("chip");
+  });
+});
