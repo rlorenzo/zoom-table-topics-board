@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6.8.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      - name: pytest
+        run: uv run pytest
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format check
+        run: uv run ruff format --check .
+
+      - name: bandit
+        run: uv run bandit -r board.py -c pyproject.toml
+
+      - name: lizard
+        run: uv run lizard board.py --CCN 10 --length 100 -w
+
+      - name: pymarkdown
+        run: uv run pymarkdown -d md013 scan README.md
+
+      - name: pre-commit
+        run: uv run pre-commit run --all-files --show-diff-on-failure

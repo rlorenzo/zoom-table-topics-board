@@ -1,0 +1,84 @@
+[project]
+name = "zoom-table-topics-board"
+version = "1.0.0"
+description = "Live Table Topics board for Zoom meetings: pick a random participant and assign them a prompt"
+readme = "README.md"
+requires-python = ">=3.14"
+license = { file = "LICENSE" }
+dependencies = [
+    "pyobjc-framework-Cocoa>=10.0 ; sys_platform == 'darwin'",
+    "pyobjc-framework-ApplicationServices>=10.0 ; sys_platform == 'darwin'",
+    "uiautomation>=2.0 ; sys_platform == 'win32'",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "bandit>=1.7",
+    "lizard>=1.17",
+    "pymarkdownlnt>=0.9",
+    "pre-commit>=3.7",
+    "pytest>=8.0",
+    "pylint>=3.0",
+    "mypy>=1.8",
+    "pip-audit>=2.7",
+]
+
+# --- Tool configuration ---------------------------------------------------
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",  # line length handled by formatter
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.bandit]
+exclude_dirs = [".venv", ".git", "tests"]
+# B104: binding to 0.0.0.0 — we explicitly bind to 127.0.0.1 only, so no issue.
+# B311: pseudo-random — used only to pick who goes next, never cryptographically.
+# tests/ excluded: `assert` (B101) is required by pytest; urlopen against the
+# local test server (B310) is safe in test context.
+
+[tool.mypy]
+python_version = "3.14"
+files = ["board.py"]
+strict = true
+
+# pyobjc and uiautomation ship no type stubs (and uiautomation isn't even
+# installed off-Windows), so we can't type-check across these boundaries.
+[[tool.mypy.overrides]]
+module = ["AppKit", "ApplicationServices", "uiautomation"]
+ignore_missing_imports = true
+
+[tool.pylint.similarities]
+min-similarity-lines = 6
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+ignore-signatures = true
+
+[tool.pymarkdown]
+extensions.front-matter.enabled = true
+plugins.line-length.line_length = 100
+plugins.no-inline-html.enabled = false
+plugins.first-line-heading.enabled = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
