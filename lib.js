@@ -75,3 +75,44 @@ export function clearStoredTopics() {
     /* ignore */
   }
 }
+
+// ---- view / board decision logic ---------------------------------
+// Which top-level view a snapshot maps to: focus > picking > board.
+export function nextView(s) {
+  if (s.activeTopicId) return "focus";
+  if (s.selected) return "picking";
+  return "board";
+}
+
+// The id of the single topic that flipped to "done" between two snapshots, so
+// the board can play a one-shot celebration. null if zero or more than one did.
+export function newlyDoneId(prevTopics, topics) {
+  const wasDone = new Set((prevTopics || []).filter((t) => t.status === "done").map((t) => t.id));
+  const nowDone = topics.filter((t) => t.status === "done" && !wasDone.has(t.id));
+  return nowDone.length === 1 ? nowDone[0].id : null;
+}
+
+// The pick-button hint: distinguishes "round finished" from "room still empty"
+// rather than keying off whether topics exist.
+export function pickHint({ toGo, answered, hasOpen }) {
+  if (toGo === 0 && answered > 0) return "Everyone has had a topic.";
+  if (toGo === 0) return "Add people to the room first.";
+  if (!hasOpen) return "Add an open topic to pick.";
+  return "";
+}
+
+// The "N open · M done" topics subhead (empty until there are topics).
+export function topicAux({ tTotal, openCount, tDone }) {
+  return tTotal ? `${openCount} open · ${tDone} done` : "";
+}
+
+// ---- class-list builders -----------------------------------------
+export function cardClass(status, choose, lockedOut) {
+  return ["card", status, choose ? "choose" : "", lockedOut ? "locked-out" : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
+export function chipClass(p) {
+  return ["chip", p.answered ? "answered" : "", p.present ? "" : "left"].filter(Boolean).join(" ");
+}

@@ -1,12 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  cardClass,
+  chipClass,
   clearStoredTopics,
   eligibleNames,
   escapeHtml,
   fmtTime,
   loadStoredTopics,
+  newlyDoneId,
+  nextView,
   parsePaste,
+  pickHint,
   saveStoredTopics,
+  topicAux,
 } from "./lib.js";
 
 const LS_KEY = "tabletopics.topics.v1";
@@ -116,5 +122,67 @@ describe("fmtTime", () => {
     const out = fmtTime(Date.UTC(2026, 0, 1, 15, 30));
     expect(typeof out).toBe("string");
     expect(out).toMatch(/\d/);
+  });
+});
+
+describe("nextView", () => {
+  it("prioritises focus > picking > board", () => {
+    expect(nextView({ activeTopicId: "t", selected: { id: "p" } })).toBe("focus");
+    expect(nextView({ activeTopicId: null, selected: { id: "p" } })).toBe("picking");
+    expect(nextView({ activeTopicId: null, selected: null })).toBe("board");
+  });
+});
+
+describe("newlyDoneId", () => {
+  const open = (id) => ({ id, status: "open" });
+  const done = (id) => ({ id, status: "done" });
+  it("returns the id of the one topic that just became done", () => {
+    expect(newlyDoneId([open("a")], [done("a")])).toBe("a");
+  });
+  it("returns null when nothing newly completed", () => {
+    expect(newlyDoneId([done("a")], [done("a")])).toBeNull();
+  });
+  it("returns null when more than one completed at once", () => {
+    expect(newlyDoneId([open("a"), open("b")], [done("a"), done("b")])).toBeNull();
+  });
+  it("tolerates a missing previous list", () => {
+    expect(newlyDoneId(undefined, [done("a")])).toBe("a");
+  });
+});
+
+describe("pickHint", () => {
+  it("says everyone went when the pool is empty but someone answered", () => {
+    expect(pickHint({ toGo: 0, answered: 3, hasOpen: true })).toBe("Everyone has had a topic.");
+  });
+  it("asks for people when the room is empty", () => {
+    expect(pickHint({ toGo: 0, answered: 0, hasOpen: true })).toBe("Add people to the room first.");
+  });
+  it("asks for a topic when none are open", () => {
+    expect(pickHint({ toGo: 2, answered: 0, hasOpen: false })).toBe("Add an open topic to pick.");
+  });
+  it("is empty when a pick is possible", () => {
+    expect(pickHint({ toGo: 2, answered: 0, hasOpen: true })).toBe("");
+  });
+});
+
+describe("topicAux", () => {
+  it("summarises open/done counts", () => {
+    expect(topicAux({ tTotal: 5, openCount: 3, tDone: 2 })).toBe("3 open · 2 done");
+  });
+  it("is empty with no topics", () => {
+    expect(topicAux({ tTotal: 0, openCount: 0, tDone: 0 })).toBe("");
+  });
+});
+
+describe("cardClass / chipClass", () => {
+  it("builds a card class, dropping empty parts", () => {
+    expect(cardClass("open", false, false)).toBe("card open");
+    expect(cardClass("open", true, false)).toBe("card open choose");
+    expect(cardClass("done", false, true)).toBe("card done locked-out");
+  });
+  it("builds a chip class from participant flags", () => {
+    expect(chipClass({ answered: true, present: true })).toBe("chip answered");
+    expect(chipClass({ answered: false, present: false })).toBe("chip left");
+    expect(chipClass({ answered: false, present: true })).toBe("chip");
   });
 });

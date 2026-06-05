@@ -1,11 +1,17 @@
 import {
+  cardClass,
+  chipClass,
   clearStoredTopics,
   eligibleNames,
   escapeHtml,
   fmtTime,
   loadStoredTopics,
+  newlyDoneId,
+  nextView,
   parsePaste,
+  pickHint,
   saveStoredTopics,
+  topicAux,
 } from "./lib.js";
 
 // ---- icons (inline so a single file ships) -----------------------
@@ -94,42 +100,40 @@ function celebrateCard(cardEl) {
   setTimeout(() => layer.remove(), 1800);
 }
 
+// Leaving the picking view: tear down any in-flight reveal so re-picking the
+// same person later (e.g. after Cancel) still triggers a fresh shuffle.
+function resetReveal() {
+  clearShuffle();
+  clearTopicRoll();
+  $("stage").classList.remove("lit");
+  lastSelectedId = null;
+  revealActive = false;
+}
+
 function render(s) {
   const prev = state;
   state = s;
 
-  // Detect a single topic flipping to done (host hit "Done") -> celebrate it.
-  const wasDone = new Set((prev.topics || []).filter((t) => t.status === "done").map((t) => t.id));
-  const newlyDone = s.topics.filter((t) => t.status === "done" && !wasDone.has(t.id));
-  if (newlyDone.length === 1) justDoneId = newlyDone[0].id;
+  // A single topic flipping to done (host hit "Done") gets a celebration.
+  const done = newlyDoneId(prev.topics, s.topics);
+  if (done) justDoneId = done;
 
-  // Mirror the live indicator into both header / stage copies.
-  // (set elsewhere by the EventSource handlers)
-
-  const view = s.activeTopicId ? "focus" : s.selected ? "picking" : "board";
-
+  const view = nextView(s);
   $("board").hidden = view !== "board";
   $("stage").hidden = view !== "picking";
   $("focus").hidden = view !== "focus";
 
-  // Leaving picking: tear down any in-flight reveal so re-picking the same
-  // person later (e.g. after Cancel) still triggers a fresh shuffle.
-  if (view !== "picking") {
-    clearShuffle();
-    clearTopicRoll();
-    $("stage").classList.remove("lit");
-    lastSelectedId = null;
-    revealActive = false;
-  }
+  if (view !== "picking") resetReveal();
 
-  if (view === "board") renderBoard(s);
-  else if (view === "picking") renderPicking(s);
-  else renderFocus(s);
+  RENDERERS[view](s);
 
   // Persist the topic set whenever it changes, and one-time re-seed
   // from localStorage if the server starts empty.
   syncTopicStorage(s);
 }
+
+// Hidden/shown above; this maps the resolved view to its renderer.
+const RENDERERS = { board: renderBoard, picking: renderPicking, focus: renderFocus };
 
 // ---- topic localStorage sync + one-time re-seed ------------------
 function syncTopicStorage(s) {
@@ -155,89 +159,91 @@ function syncTopicStorage(s) {
 }
 
 // ---- topic card markup (shared by board + picking choices) -------
-function topicCard(t, opts) {
-  opts = opts || {};
+function cardStatusTag(t) {
+  if (t.status === "done") return `<span class="status-tag">${ICON_DONE}Done</span>`;
+  if (t.status === "active") return `<span class="status-tag">${ICON_DOT}On now</span>`;
+  return `<span class="status-tag">${ICON_OPEN}Open</span>`;
+}
+
+// The detail is a surprise: hidden on open cards, revealed only once the topic
+// is chosen (the focus view, and afterward on the done/active card).
+function cardDetails(t) {
+  return t.details && t.status !== "open" ? `<div class="dt">${escapeHtml(t.details)}</div>` : "";
+}
+
+function cardAssignee(t) {
+  return t.assignee
+    ? `<div class="assignee">${ICON_PERSON}<span class="who">${escapeHtml(t.assignee.name)}</span></div>`
+    : "";
+}
+
+// Open cards (board only) get edit + remove — never in pick "choose" mode.
+function cardTools(t, opts) {
+  if (opts.pickMode || t.status !== "open") return "";
+  return (
+    `<div class="card-tools">` +
+    `<button class="tool" type="button" data-act="edit" data-tid="${t.id}" aria-label="Edit topic">${ICON_EDIT}</button>` +
+    `<button class="tool danger" type="button" data-act="remove-topic" data-tid="${t.id}" aria-label="Remove topic">${ICON_TRASH}</button>` +
+    `</div>`
+  );
+}
+
+// Done/active cards get a reopen link — never in pick "choose" mode.
+function cardReopen(t, opts) {
+  if (opts.pickMode || (t.status !== "done" && t.status !== "active")) return "";
+  return `<button class="reopen-link" type="button" data-act="reopen" data-tid="${t.id}">${ICON_REOPEN}<span>Reopen</span></button>`;
+}
+
+function topicCard(t, opts = {}) {
   const choose = !!opts.choose && t.status === "open";
   const lockedOut = !!opts.pickMode && t.status !== "open";
-
-  const statusTag =
-    t.status === "done"
-      ? `<span class="status-tag">${ICON_DONE}Done</span>`
-      : t.status === "active"
-        ? `<span class="status-tag">${ICON_DOT}On now</span>`
-        : `<span class="status-tag">${ICON_OPEN}Open</span>`;
-
-  // The extra detail is a surprise: it stays hidden on open cards (the board
-  // and the picking choices) with no hint it exists, and only appears once
-  // the topic is chosen — in the full-screen focus view, and afterward on the
-  // done/active card.
-  const details =
-    t.details && t.status !== "open" ? `<div class="dt">${escapeHtml(t.details)}</div>` : "";
-
-  let assigneeBlock = "";
-  if (t.assignee) {
-    assigneeBlock = `<div class="assignee">${ICON_PERSON}<span class="who">${escapeHtml(t.assignee.name)}</span></div>`;
-  }
-
-  // Per-card affordances. Open cards (board only) get edit + remove.
-  // Done cards get a reopen link. None of these render in pick "choose" mode.
-  let tools = "";
-  let reopen = "";
-  if (!opts.pickMode) {
-    if (t.status === "open") {
-      tools =
-        `<div class="card-tools">` +
-        `<button class="tool" type="button" data-act="edit" data-tid="${t.id}" aria-label="Edit topic">${ICON_EDIT}</button>` +
-        `<button class="tool danger" type="button" data-act="remove-topic" data-tid="${t.id}" aria-label="Remove topic">${ICON_TRASH}</button>` +
-        `</div>`;
-    }
-    if (t.status === "done" || t.status === "active") {
-      reopen = `<button class="reopen-link" type="button" data-act="reopen" data-tid="${t.id}">${ICON_REOPEN}<span>Reopen</span></button>`;
-    }
-  }
-
-  const cls = ["card", t.status, choose ? "choose" : "", lockedOut ? "locked-out" : ""]
-    .filter(Boolean)
-    .join(" ");
-
   const inner =
-    statusTag +
+    cardStatusTag(t) +
     `<div class="hl">${escapeHtml(t.headline)}</div>` +
-    details +
-    assigneeBlock +
-    reopen;
-
+    cardDetails(t) +
+    cardAssignee(t) +
+    cardReopen(t, opts);
+  const cls = cardClass(t.status, choose, lockedOut);
   if (choose) {
     // A real button so it's keyboard-operable; click assigns the topic.
     return `<button class="${cls}" type="button" data-act="assign" data-tid="${t.id}">${inner}</button>`;
   }
   // Static card (board open/active/done, or picking locked-out).
-  return `<div class="${cls}" data-tid="${t.id}">${tools}${inner}</div>`;
+  return `<div class="${cls}" data-tid="${t.id}">${cardTools(t, opts)}${inner}</div>`;
 }
 
 // ============================== BOARD ==============================
+// One-shot celebration for the card that just flipped to done.
+function celebrateNewlyDone(host) {
+  if (!justDoneId) return;
+  const doneCard = host.querySelector(`.card.done[data-tid="${justDoneId}"]`);
+  justDoneId = null; // consume it — this render only
+  if (!doneCard || reduceMotion()) return;
+  requestAnimationFrame(() => {
+    doneCard.classList.add("just-done");
+    celebrateCard(doneCard);
+  });
+}
+
 function renderBoard(s) {
   $("since").textContent = fmtTime(s.startedAt);
 
   const present = s.participants.filter((p) => p.present);
-  const inRoom = present.length;
   const answered = present.filter((p) => p.answered).length;
-  // Eligible "still to go" mirrors the server pool: present, not answered, not host.
+  // "Still to go" mirrors the server pool: present, not answered, not host.
   const toGo = present.filter((p) => !p.answered && !p.is_host).length;
   const tDone = s.topics.filter((t) => t.status === "done").length;
   const tTotal = s.topics.length;
+  const openCount = s.topics.filter((t) => t.status === "open").length;
 
   $("s-togo").textContent = toGo;
   $("s-answered").textContent = answered;
-  $("s-room").textContent = inRoom;
+  $("s-room").textContent = present.length;
   $("s-tdone").textContent = tDone;
   $("s-ttotal").textContent = tTotal;
+  $("topicsAux").textContent = topicAux({ tTotal, openCount, tDone });
 
-  // ---- topics ----
   const host = $("topicsHost");
-  const openCount = s.topics.filter((t) => t.status === "open").length;
-  $("topicsAux").textContent = tTotal ? `${openCount} open · ${tDone} done` : "";
-
   if (tTotal === 0) {
     host.innerHTML = `<div class="topic-empty">
            <h3>No topics yet</h3>
@@ -247,41 +253,36 @@ function renderBoard(s) {
   } else {
     host.innerHTML = `<div class="topics">${s.topics.map((t) => topicCard(t, {})).join("")}</div>`;
   }
+  celebrateNewlyDone(host);
 
-  // Celebrate the card that just became done (one render only).
-  if (justDoneId) {
-    const doneCard = host.querySelector(`.card.done[data-tid="${justDoneId}"]`);
-    if (doneCard && !reduceMotion()) {
-      requestAnimationFrame(() => {
-        doneCard.classList.add("just-done");
-        celebrateCard(doneCard);
-      });
-    }
-    justDoneId = null;
-  }
-
-  // ---- roster ----
   renderRoster(s);
 
-  // ---- primary CTA enable/disable ----
-  // `toGo` (above) is exactly the pick-eligible pool — present, not answered,
-  // not host — so reuse it instead of recomputing the same filter.
+  // Primary CTA: toGo is exactly the pick-eligible pool (present, !answered, !host).
   const hasOpen = openCount > 0;
-  const btn = $("pickBtn");
-  const hint = $("pickHint");
-  btn.disabled = toGo === 0 || !hasOpen;
-  // No one left to pick: distinguish "the round is finished" (someone has
-  // answered) from "the room is still empty" (no one has) — not by whether
-  // topics exist, which mislabels an empty room that already has topics.
-  if (toGo === 0 && answered > 0) {
-    hint.textContent = "Everyone has had a topic.";
-  } else if (toGo === 0) {
-    hint.textContent = "Add people to the room first.";
-  } else if (!hasOpen) {
-    hint.textContent = "Add an open topic to pick.";
-  } else {
-    hint.textContent = "";
-  }
+  $("pickBtn").disabled = toGo === 0 || !hasOpen;
+  $("pickHint").textContent = pickHint({ toGo, answered, hasOpen });
+}
+
+function rosterStateIcon(p) {
+  if (!p.present) return ICON_DOT;
+  if (p.answered) return `<span class="state-ic done">${ICON_DONE}</span>`;
+  return `<span class="state-ic present">${ICON_OPEN}</span>`;
+}
+
+function rosterChip(p) {
+  // Clicking a present name manually selects them (host included). Someone who
+  // already had their turn isn't selectable — same one-turn rule as the random
+  // roll, and the server rejects it anyway.
+  const canSelect = p.present && !p.answered;
+  const hostPill = p.is_host ? `<span class="host-pill">host</span>` : "";
+  const nameBtn =
+    `<button class="pick-name" type="button" ${canSelect ? "" : "disabled"} data-act="select" data-pid="${p.id}">` +
+    rosterStateIcon(p) +
+    `<span class="who">${escapeHtml(p.name)}</span>` +
+    hostPill +
+    `</button>`;
+  const removeBtn = `<button class="x" type="button" data-act="remove-p" data-pid="${p.id}" aria-label="Remove ${escapeHtml(p.name)}">${ICON_X}</button>`;
+  return `<span class="${chipClass(p)}">${nameBtn}${removeBtn}</span>`;
 }
 
 function renderRoster(s) {
@@ -290,31 +291,7 @@ function renderRoster(s) {
     roster.innerHTML = `<div class="empty" style="width:100%">No one yet. Joins appear automatically, or add someone below.</div>`;
     return;
   }
-  roster.innerHTML = s.participants
-    .map((p) => {
-      const cls = ["chip", p.answered ? "answered" : "", p.present ? "" : "left"]
-        .filter(Boolean)
-        .join(" ");
-      const stateIc = !p.present
-        ? ICON_DOT
-        : p.answered
-          ? `<span class="state-ic done">${ICON_DONE}</span>`
-          : `<span class="state-ic present">${ICON_OPEN}</span>`;
-      const hostPill = p.is_host ? `<span class="host-pill">host</span>` : "";
-      // Clicking a present name manually selects them (host included). Someone
-      // who already had their turn isn't selectable — same one-turn rule as the
-      // random roll, and the server rejects it anyway.
-      const canSelect = p.present && !p.answered;
-      const nameBtn =
-        `<button class="pick-name" type="button" ${canSelect ? "" : "disabled"} data-act="select" data-pid="${p.id}">` +
-        stateIc +
-        `<span class="who">${escapeHtml(p.name)}</span>` +
-        hostPill +
-        `</button>`;
-      const removeBtn = `<button class="x" type="button" data-act="remove-p" data-pid="${p.id}" aria-label="Remove ${escapeHtml(p.name)}">${ICON_X}</button>`;
-      return `<span class="${cls}">${nameBtn}${removeBtn}</span>`;
-    })
-    .join("");
+  roster.innerHTML = s.participants.map(rosterChip).join("");
 }
 
 // ============================= PICKING =============================
@@ -362,13 +339,16 @@ function randomizeTopic() {
   if (topicRolling) return;
   const cards = [...document.querySelectorAll("#pickTopicsHost .card.choose")];
   if (!cards.length) return;
-  const targetIdx = Math.floor(Math.random() * cards.length);
-  const targetTid = cards[targetIdx].dataset.tid;
+  startTopicRoll(cards, Math.floor(Math.random() * cards.length));
+}
 
-  if (reduceMotion() || cards.length === 1) {
+function startTopicRoll(cards, targetIdx) {
+  const targetTid = cards[targetIdx].dataset.tid;
+  const assign = () => {
     if (targetTid) post(`/api/topic/${targetTid}/assign`);
-    return;
-  }
+  };
+  // Reduced motion or a single option: skip straight to the pick.
+  if (reduceMotion() || cards.length === 1) return assign();
 
   topicRolling = true;
   $("stage").classList.add("rolling");
@@ -377,14 +357,12 @@ function randomizeTopic() {
 
   const n = cards.length;
   const totalSteps = n * 2 + targetIdx + 1; // ~2 loops, then settle on target
-  const minD = 70,
-    maxD = 360;
+  const minD = 70;
+  const maxD = 360;
   let step = 0;
 
   const tick = () => {
-    cards.forEach((c) => {
-      c.classList.remove("flash");
-    });
+    for (const c of cards) c.classList.remove("flash");
     const card = cards[step % n];
     card.classList.add("flash");
     step++;
@@ -392,7 +370,7 @@ function randomizeTopic() {
       card.classList.add("flash-final");
       topicRollTimer = setTimeout(() => {
         topicRolling = false;
-        if (targetTid) post(`/api/topic/${targetTid}/assign`);
+        assign();
       }, 520);
       return;
     }
@@ -402,34 +380,34 @@ function randomizeTopic() {
   tick();
 }
 
+// Render the open topic cards as the choice grid. While a Press-Your-Luck roll
+// animates, the grid is left in place so the highlight chase isn't wiped by an
+// incoming snapshot.
+function renderPickChoices(s) {
+  const choices = s.topics
+    .map((t) => topicCard(t, { pickMode: true, choose: t.status === "open" }))
+    .join("");
+  $("pickTopicsHost").innerHTML = s.topics.length
+    ? `<div class="topics">${choices}</div>`
+    : `<div class="empty" style="width:100%">No topics to assign. Cancel and add some first.</div>`;
+  $("randomTopicBtn").disabled = s.topics.filter((t) => t.status === "open").length === 0;
+}
+
+// A brand-new selection plays the shuffle reveal; re-rendering onto an
+// already-settled one (e.g. a topic was removed mid-pick) keeps the settled UI.
+function applyReveal(s, sel, isNew) {
+  if (isNew) startReveal(s, sel);
+  else if (!revealActive) settleReveal(sel);
+}
+
 function renderPicking(s) {
   const sel = s.selected;
   $("stagePool").textContent = "";
+  if (!topicRolling) renderPickChoices(s);
 
-  // Render the open topic cards as the choice grid (always reflect state).
-  // While a Press-Your-Luck roll is animating, leave the grid in place so the
-  // highlight chase isn't wiped by an incoming snapshot.
-  if (!topicRolling) {
-    const choices = s.topics
-      .map((t) => topicCard(t, { pickMode: true, choose: t.status === "open" }))
-      .join("");
-    $("pickTopicsHost").innerHTML = s.topics.length
-      ? `<div class="topics">${choices}</div>`
-      : `<div class="empty" style="width:100%">No topics to assign. Cancel and add some first.</div>`;
-    $("randomTopicBtn").disabled = s.topics.filter((t) => t.status === "open").length === 0;
-  }
-
-  // Detect a NEW selection -> play the shuffle reveal.
-  const isNewSelection = sel && sel.id !== lastSelectedId;
+  const isNew = sel && sel.id !== lastSelectedId;
   lastSelectedId = sel ? sel.id : null;
-
-  if (isNewSelection) {
-    startReveal(s, sel);
-  } else if (!revealActive) {
-    // Re-render landing on an already-settled selection (e.g. a topic was
-    // removed while picking) — keep the settled UI without re-shuffling.
-    settleReveal(sel);
-  }
+  applyReveal(s, sel, isNew);
 }
 
 function startReveal(s, sel) {
@@ -640,35 +618,19 @@ $("focusBackBtn").addEventListener("click", () => {
 });
 
 // ---- Global click delegation (topic cards, roster chips) ---------
+const CLICK_ACTIONS = {
+  assign: (tid) => tid && post(`/api/topic/${tid}/assign`),
+  reopen: (tid) => tid && post(`/api/topic/${tid}/reopen`),
+  "remove-topic": (tid) => tid && confirm("Remove this topic?") && post(`/api/topic/${tid}/remove`),
+  edit: (tid) => tid && editTopic(tid),
+  select: (_tid, pid) => pid && post("/api/select", { pid }),
+  "remove-p": (_tid, pid) => pid && post(`/api/participant/${pid}/remove`),
+  "open-add": () => openAddEditor(),
+};
 document.addEventListener("click", (e) => {
-  const t = e.target.closest("[data-act]");
-  if (!t) return;
-  const act = t.dataset.act;
-  const tid = t.dataset.tid;
-  const pid = t.dataset.pid;
-  switch (act) {
-    case "assign":
-      if (tid) post(`/api/topic/${tid}/assign`);
-      break;
-    case "reopen":
-      if (tid) post(`/api/topic/${tid}/reopen`);
-      break;
-    case "remove-topic":
-      if (tid && confirm("Remove this topic?")) post(`/api/topic/${tid}/remove`);
-      break;
-    case "edit":
-      if (tid) editTopic(tid);
-      break;
-    case "select":
-      if (pid) post("/api/select", { pid });
-      break;
-    case "remove-p":
-      if (pid) post(`/api/participant/${pid}/remove`);
-      break;
-    case "open-add":
-      openAddEditor();
-      break;
-  }
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  CLICK_ACTIONS[el.dataset.act]?.(el.dataset.tid, el.dataset.pid);
 });
 
 // Edit via a small on-brand dialog (native <dialog>: accessible, ESC-to-close,
@@ -726,15 +688,20 @@ document.addEventListener("keydown", (e) => {
 // ====================================================================
 //  LIVE STREAM
 // ====================================================================
+function eachEl(ids, fn) {
+  for (const id of ids) {
+    const el = $(id);
+    if (el) fn(el);
+  }
+}
+
 function setLive(text, stale) {
-  for (const id of ["live", "live2"]) {
-    const el = $(id);
-    if (el) el.textContent = text;
-  }
-  for (const id of ["liveDot", "liveDot2"]) {
-    const el = $(id);
-    if (el) el.classList.toggle("stale", !!stale);
-  }
+  eachEl(["live", "live2"], (el) => {
+    el.textContent = text;
+  });
+  eachEl(["liveDot", "liveDot2"], (el) => {
+    el.classList.toggle("stale", !!stale);
+  });
 }
 
 const es = new EventSource("/events");
