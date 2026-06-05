@@ -15,6 +15,7 @@
     "test:cov": "vitest run --coverage",
     "deadcode": "fallow --skip health",
     "health": "fallow health",
+    "record:demo": "node scripts/record-demo.mjs",
     "check": "npm run lint && npm run validate:html && npm run test:cov && npm run deadcode"
   },
   "devDependencies": {
@@ -23,6 +24,7 @@
     "fallow": "2.89.0",
     "html-validate": "11.5.2",
     "jsdom": "29.1.1",
+    "playwright": "^1.60.0",
     "vitest": "4.1.8"
   }
 }

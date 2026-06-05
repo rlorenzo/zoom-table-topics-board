@@ -13,6 +13,17 @@
 
 <!-- ============================ BOARD (default) ============================ -->
 <div class="wrap" id="board">
+  <div class="demo-bar" id="demoBar" hidden>
+    <span class="demo-bar-ic" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6.5L4.8 18a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3L14 9.5V3"/><path d="M7 14.5h10"/></svg>
+    </span>
+    <div class="demo-bar-text">
+      <b>Demo mode</b>
+      <span>Sample people and prompts, so you can try a full round.</span>
+    </div>
+    <button class="btn ghost demo-bar-exit" id="demoExitBtn" type="button">Exit demo</button>
+  </div>
+
   <header>
     <div class="meta">
       <span class="dot" id="liveDot" aria-hidden="true"></span>
@@ -22,7 +33,7 @@
     </div>
     <div class="titlebar">
       <h1 class="app-title"><svg class="brandmark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v4M8.5 21h7"/></svg>Table Topics</h1>
-      <div>
+      <div id="pickGroup">
         <button class="cta" id="pickBtn" type="button">
           <svg class="dice" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3" y="3" width="18" height="18" rx="3"/>
@@ -46,6 +57,24 @@
   </div>
 
   <main aria-live="polite">
+    <section class="welcome" id="welcome" aria-labelledby="welcomeTitle" hidden>
+      <div class="welcome-card">
+        <span class="welcome-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v4M8.5 21h7"/></svg>
+        </span>
+        <h2 id="welcomeTitle">Welcome. Want to see how it works?</h2>
+        <p>Table Topics rolls a random person, hands them a prompt, and puts it up big for the whole room. Load a sample meeting to try the full flow, then clear it whenever you're ready for the real thing.</p>
+        <div class="welcome-actions">
+          <button class="cta" id="demoStartBtn" type="button">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72a1 1 0 0 0 1.52.85l11-6.86a1 1 0 0 0 0-1.7l-11-6.86A1 1 0 0 0 8 5.14z"/></svg>
+            <span>Try a quick demo</span>
+          </button>
+          <button class="welcome-skip" id="demoSkipBtn" type="button">Set up my own board</button>
+        </div>
+        <p class="welcome-foot">Loads a sample room and a few prompts. Nothing is saved, and exiting clears it.</p>
+      </div>
+    </section>
+
     <div class="section-head">
       <h2>Topics</h2>
       <span class="aux" id="topicsAux"></span>
@@ -156,8 +185,11 @@
 <div class="focus" id="focus" hidden>
   <div class="focus-glow" aria-hidden="true"></div>
   <div class="focus-who">
-    <span class="label">Up now</span>
-    <span id="focusName">&nbsp;</span>
+    <div class="focus-avatar" id="focusAvatar" aria-hidden="true"><span id="focusInitials">&nbsp;</span></div>
+    <div class="focus-who-text">
+      <span class="label">Up now</span>
+      <span id="focusName">&nbsp;</span>
+    </div>
   </div>
   <div class="focus-body">
     <div class="focus-headline" id="focusHeadline">&nbsp;</div>

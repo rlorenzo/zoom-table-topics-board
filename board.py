@@ -488,6 +488,44 @@ def read_zoom_participants(
     return None
 
 
+# --- Demo mode sample data -------------------------------------------------
+# Loaded by start_demo() so a first-time host can try the whole flow (roll a
+# name, hand over a prompt, run the focus view) without a live Zoom meeting.
+# Stopping the demo wipes all of it back to a clean slate. The host is listed
+# first so they land in order[0]; they're excluded from the roll, leaving six
+# eligible speakers for a full sample round.
+DEMO_PARTICIPANTS: list[tuple[str, bool]] = [
+    ("Sam Rivera", True),  # the host runs the board and is skipped by the roll
+    ("Maya Chen", False),
+    ("Diego Santos", False),
+    ("Priya Patel", False),
+    ("Logan Brooks", False),
+    ("Aisha Okafor", False),
+    ("Noah Kim", False),
+]
+
+DEMO_TOPICS: list[dict[str, str]] = [
+    {
+        "headline": "What's a small win you had this week?",
+        "details": "Anything counts. Keep it to a minute or so.",
+    },
+    {
+        "headline": "If you could instantly master one skill, what would it be?",
+        "details": "",
+    },
+    {
+        "headline": "Describe a place you'd happily go back to.",
+        "details": "Tell us what makes it worth a second visit.",
+    },
+    {"headline": "What's the best advice you never took?", "details": ""},
+    {"headline": "What everyday thing are you quietly great at?", "details": ""},
+    {
+        "headline": "If this week had a theme song, what would it be?",
+        "details": "No wrong answers. Bonus points for humming a bar.",
+    },
+]
+
+
 # --- State -----------------------------------------------------------------
 class State:
     """In-memory, per-meeting state. Ephemeral: nothing is persisted server-side.
@@ -507,6 +545,7 @@ class State:
         self.topic_order: list[str] = []  # topic ids in display order
         self.selected_pid: str | None = None  # rolled person awaiting a topic
         self.active_topic_id: str | None = None  # topic currently on the focus view
+        self.demo = False  # True while the sample meeting is loaded (try-it mode)
         self.clients: set[queue.Queue[str]] = set()  # one Queue per SSE client
         self._topic_seq = 0  # monotonic, never reused even across reset
 
@@ -622,6 +661,7 @@ class State:
                 "topics": topics,
                 "selected": selected,
                 "activeTopicId": self.active_topic_id,
+                "demo": self.demo,
             }
 
     def broadcast(self) -> None:
@@ -645,6 +685,11 @@ class State:
         changed = False
         now = time.time() * 1000
         with self.lock:
+            # While the sample meeting is loaded, the demo owns the roster.
+            # Ignore live Zoom reads so real names can't leak into the demo
+            # (and so leaving the demo's "speakers" can't be marked as left).
+            if self.demo:
+                return False
             seen: set[str] = set()
             host_pid: str | None = None
             for entry in people:
@@ -883,6 +928,53 @@ class State:
             self.active_topic_id = None
         self.broadcast()
 
+    # --- demo mode ---------------------------------------------------------
+    def _wipe(self) -> None:
+        """Clear the whole meeting: roster, topics, and any in-flight round.
+        Caller must hold self.lock."""
+        self.participants.clear()
+        self.order.clear()
+        self.topics.clear()
+        self.topic_order.clear()
+        self.selected_pid = None
+        self.active_topic_id = None
+        self.started_at = time.time() * 1000
+
+    def start_demo(self) -> None:
+        """Load the sample meeting so a first-time host can try the flow.
+
+        Replaces whatever is loaded with a fixed set of sample people and
+        prompts and flips on the demo flag (which parks the Zoom reader).
+        Demo participants get a 'd' id prefix so they're never confused with
+        auto-read ('a') or manual ('m') entries.
+        """
+        with self.lock:
+            self._wipe()
+            self.demo = True
+            for i, (name, is_host) in enumerate(DEMO_PARTICIPANTS):
+                pid = f"d{i}"
+                self.participants[pid] = {
+                    "id": pid,
+                    "name": name,
+                    "joinTime": time.time() * 1000,
+                    "leftTime": None,
+                    "present": True,
+                    "answered": False,
+                    "is_host": is_host,
+                }
+                self.order.append(pid)
+            for t in DEMO_TOPICS:
+                self._make_topic(t["headline"], t.get("details", ""))
+        self.broadcast()
+
+    def stop_demo(self) -> None:
+        """Exit the demo back to a clean slate: wipe the sample meeting and let
+        the Zoom reader resume populating the roster."""
+        with self.lock:
+            self._wipe()
+            self.demo = False
+        self.broadcast()
+
 
 STATE = State()
 
@@ -1090,6 +1182,15 @@ class Handler(BaseHTTPRequestHandler):
         STATE.reset()
         self._json(200, {"ok": True})
 
+    # --- demo mode endpoints ----------------------------------------------
+    def _post_demo_start(self) -> None:
+        STATE.start_demo()
+        self._json(200, {"ok": True})
+
+    def _post_demo_stop(self) -> None:
+        STATE.stop_demo()
+        self._json(200, {"ok": True})
+
 
 # Bind route table after the class body so handlers exist as attributes.
 Handler._STATIC_POST = {
@@ -1100,6 +1201,8 @@ Handler._STATIC_POST = {
     "/api/select": Handler._post_select,
     "/api/pick/cancel": Handler._post_cancel_pick,
     "/api/reset": Handler._post_reset,
+    "/api/demo/start": Handler._post_demo_start,
+    "/api/demo/stop": Handler._post_demo_stop,
 }
 
 
