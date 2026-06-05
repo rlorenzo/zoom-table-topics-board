@@ -19,6 +19,7 @@ dev = [
     "pymarkdownlnt>=0.9",
     "pre-commit>=3.7",
     "pytest>=8.0",
+    "pytest-cov>=5.0",
     "pylint>=3.0",
     "mypy>=1.8",
     "pip-audit>=2.7",
@@ -81,4 +82,17 @@ plugins.first-line-heading.enabled = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+# Coverage is gated at a floor (not a target): the ~29% uncovered is the macOS/
+# Windows accessibility scraping, the poller, and main()/CLI glue, none of which
+# runs headlessly. Raise --cov-fail-under as the testable surface grows.
+addopts = "-ra --cov=board --cov-report=term-missing --cov-fail-under=70"
+
+[tool.coverage.run]
+source = ["board"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
