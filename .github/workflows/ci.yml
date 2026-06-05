@@ -43,26 +43,30 @@ jobs:
       - name: pymarkdown
         run: uv run pymarkdown -d md013 scan README.md
 
-      - name: pre-commit
-        run: uv run pre-commit run --all-files --show-diff-on-failure
+      # Web hooks (biome/html-validate/vitest/fallow) need node_modules, which
+      # this Python job doesn't install — they run in the `web` job instead.
+      - name: pre-commit (python hooks)
+        run: SKIP=biome,html-validate,vitest,fallow uv run pre-commit run --all-files --show-diff-on-failure
 
-  # Web tooling (HTML / CSS / JS). Node ships preinstalled on the runner, so the
-  # Rust-native binaries (biome, fallow) and html-validate are fetched on demand
-  # via npx with pinned versions — no package.json / node_modules in the repo.
-  # Dormant until the inline JS/CSS in index.html is extracted; see
-  # docs/web-tooling.md.
+  # Web tooling (HTML / CSS / JS), driven by package.json + the committed
+  # lockfile. Node ships preinstalled on the runner; `npm ci` gives a
+  # reproducible install, then each check runs through its npm script.
   web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
-        with:
-          fetch-depth: 0  # fallow audit diffs the branch against its base ref
+
+      - name: Install web dev dependencies
+        run: npm ci
 
       - name: biome (js/css lint + format check)
-        run: npx --yes @biomejs/biome@2.4.16 ci .
+        run: npm run lint
 
       - name: html-validate (html structure / a11y)
-        run: npx --yes html-validate@11.5.2 index.html
+        run: npm run validate:html
 
-      - name: fallow (dead code, duplication, complexity)
-        run: npx --yes fallow@2.88.3 audit --base origin/main
+      - name: vitest (unit tests + coverage)
+        run: npm run test:cov
+
+      - name: fallow (dead code + duplication)
+        run: npm run deadcode

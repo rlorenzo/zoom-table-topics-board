@@ -1,0 +1,25 @@
+{
+  "name": "zoom-table-topics-board",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Front-end assets and web tooling for the Table Topics board",
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "validate:html": "html-validate index.html",
+    "test": "vitest run",
+    "test:cov": "vitest run --coverage",
+    "deadcode": "fallow --skip health",
+    "health": "fallow health",
+    "check": "npm run lint && npm run validate:html && npm run test:cov && npm run deadcode"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.16",
+    "@vitest/coverage-v8": "4.1.8",
+    "fallow": "2.89.0",
+    "html-validate": "11.5.2",
+    "jsdom": "29.1.1",
+    "vitest": "4.1.8"
+  }
+}

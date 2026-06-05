@@ -64,6 +64,16 @@ def _get(url):
     return code, raw
 
 
+def _get_headers(url):
+    """GET returning (status, Content-Type, body) for header assertions."""
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
+            return resp.status, resp.headers.get("Content-Type", ""), resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Content-Type", ""), e.read()
+
+
 def _add_participant(server, name):
     """Add a manual participant and return its id."""
     _post(server + "/api/participant", {"name": name})
@@ -99,6 +109,33 @@ class TestGetRoot:
         code, raw = _get(server + "/")
         assert code == 500
         assert b"index.html missing" in raw
+
+
+class TestStaticAssets:
+    @pytest.mark.parametrize(
+        "path, ctype, needle",
+        [
+            ("/app.js", "text/javascript", b'from "./lib.js"'),
+            ("/lib.js", "text/javascript", b"export function escapeHtml"),
+            ("/styles.css", "text/css", b"{"),
+        ],
+    )
+    def test_serves_web_assets(self, server, path, ctype, needle):
+        code, content_type, raw = _get_headers(server + path)
+        assert code == 200
+        assert ctype in content_type
+        assert needle in raw
+
+    def test_missing_asset_returns_404(self, server, monkeypatch, tmp_path):
+        # A configured asset whose file is missing 404s (not 500, unlike index).
+        monkeypatch.setattr(
+            board,
+            "STATIC_FILES",
+            {"/app.js": (str(tmp_path / "nope.js"), "text/javascript; charset=utf-8")},
+        )
+        code, _, raw = _get_headers(server + "/app.js")
+        assert code == 404
+        assert b"not found" in raw
 
 
 class TestPostAddParticipant:

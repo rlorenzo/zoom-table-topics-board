@@ -1,92 +1,85 @@
 # Web tooling (HTML / CSS / JS)
 
-The Python side of this project (`board.py`, `tests/`) is linted by ruff, mypy,
-bandit, lizard, pylint and friends. This document covers the parallel toolchain
-for the front-end (`index.html` and, once extracted, `app.js` / `styles.css`).
+The Python side (`board.py`, `tests/`) is linted by ruff, mypy, bandit, lizard,
+pylint and covered by pytest. This document covers the parallel toolchain for
+the front-end.
+
+## Front-end layout
+
+The page used to be a single `index.html` with everything inline. It's now split
+so the JS is lintable and testable:
+
+| File | What it is |
+| --- | --- |
+| `index.html` | Markup only; links `styles.css` and loads `app.js` as a module. |
+| `styles.css` | All styles (was the inline `<style>`). |
+| `app.js` | The browser app: DOM rendering, event wiring, SSE. Imports from `lib.js`. |
+| `lib.js` | Pure, DOM-free helpers (`escapeHtml`, `parsePaste`, `eligibleNames`, the topic-localStorage functions, `fmtTime`). No side effects on import — this is the unit-tested module. |
+| `lib.test.js` | Vitest unit tests for `lib.js`. |
+
+`board.py` serves `app.js`, `lib.js`, and `styles.css` as static files via an
+explicit allowlist (`STATIC_FILES`) — the path is never derived from the
+request, so there's no traversal surface.
 
 ## Tools
 
-| Tool | Covers | Notes |
-| --- | --- | --- |
-| [Biome](https://biomejs.dev) `2.4.16` | JS + CSS lint **and** format | Rust-native, single binary. One tool for both languages. |
-| [fallow](https://docs.fallow.tools) `2.88.3` | JS dead code, duplication, complexity | Rust-native. Mirrors what `lizard` + `pylint --enable=duplicate-code` do for Python. |
-| [html-validate](https://html-validate.org) `11.5.2` | HTML structure + accessibility | The one Node-only tool; Biome/fallow don't validate HTML semantics. |
+| Tool | Covers |
+| --- | --- |
+| [Biome](https://biomejs.dev) | JS + CSS lint **and** format (one binary). |
+| [Vitest](https://vitest.dev) + jsdom | Unit tests for `lib.js`, with v8 coverage. |
+| [fallow](https://docs.fallow.tools) | JS dead-code + duplication (and complexity, on demand). |
+| [html-validate](https://html-validate.org) | HTML structure + accessibility. |
 
-**oxlint was intentionally skipped.** It's an excellent, very fast linter, but
-it's JS/TS-only (no CSS, no HTML) and lint-only (no formatter yet), so Biome
-already covers everything it would here. Revisit if the JS grows large enough
-that a dedicated ultra-fast lint pass earns its keep.
+**oxlint** was intentionally skipped — JS/TS-only and lint-only, so Biome already
+covers its ground here.
 
-No `package.json` or `node_modules` is committed. The binaries are fetched on
-demand — via pre-commit-managed node environments locally and pinned `npx`
-invocations in CI.
+## package.json, not npx
 
-## Status: armed but dormant
-
-All of the front-end JS and CSS currently lives **inline** inside `index.html`
-(one `<style>` block and one `<script>` block). Biome and fallow operate on
-standalone files and cannot see code embedded in HTML, so today:
-
-- **html-validate** runs against `index.html` and is the only active check
-  (0 errors, a few warnings — see below).
-- **Biome** and **fallow** are configured and wired, but match no files yet, so
-  they pass trivially.
-
-The tooling activates automatically once the inline code is extracted (planned
-for a follow-up branch off `main`, kept separate so it doesn't collide with the
-in-flight UI redesign of `index.html`).
-
-### Extraction convention
-
-For the configs here to "just work" when extraction happens, the inline blocks
-should become **repo-root** files referenced from `index.html`:
-
-```html
-<link rel="stylesheet" href="styles.css" />
-<script src="app.js"></script>
-```
-
-- `biome.json` already globs `**/*.js` and `**/*.css`.
-- `.fallowrc.jsonc` already declares `app.js` as the entry point.
-
-### Getting full value from fallow
-
-As a single flat browser script, `app.js` has no `import`/`export` graph, so
-fallow's headline dead-code features (unused files/exports, circular deps) will
-find nothing — you'll get its duplication and complexity passes only. If the JS
-is later split into a few **native ES modules** (`<script type="module">`, no
-bundler, loads fine over `http://localhost:3000`), fallow's full analysis lights
-up. Update the `entry` list in `.fallowrc.jsonc` accordingly.
-
-## Running locally
+All versions live in `package.json` and are locked in `package-lock.json`, so
+installs are reproducible (`npm ci`) and auditable (`npm audit`). Run `npm
+install` once — the Node-side counterpart to `uv sync` for Python. `node_modules`
+is not committed.
 
 ```bash
-# JS + CSS: report problems (no changes)
-npx @biomejs/biome@2.4.16 check .
-# JS + CSS: fix + format in place
-npx @biomejs/biome@2.4.16 check --write .
+npm install          # one-time (and after package.json changes)
 
-# HTML structure / accessibility
-npx html-validate@11.5.2 index.html
-
-# JS dead code + duplication + complexity (whole tree)
-npx fallow@2.88.3
-# or, gate just the diff against a base ref:
-npx fallow@2.88.3 audit --base main
+npm run lint         # biome check .          (lint + format check)
+npm run format       # biome check --write .  (fix + format)
+npm run validate:html
+npm test             # vitest run
+npm run test:cov     # vitest run --coverage  (gated, see below)
+npm run deadcode     # fallow --skip health   (dead code + duplication)
+npm run health       # fallow health          (complexity/CRAP report, on demand)
+npm run check        # lint + html + test:cov + deadcode
 ```
 
-These also run through `pre-commit` (see `.pre-commit-config.yaml`): biome and
-html-validate at commit time, fallow at push time (like `pip-audit`).
+## How it runs in CI and pre-commit
 
-## html-validate rule choices
+- **CI** has a dedicated `web` job: `npm ci`, then each check via its `npm run`
+  script. The Python `lint` job skips the web hooks (`SKIP=...`) because it has
+  no `node_modules`.
+- **pre-commit** runs biome + html-validate at commit time and vitest + fallow
+  at push time, using the local `node_modules` (so `npm install` is required,
+  alongside `uv sync`).
 
-`.htmlvalidate.json` extends `html-validate:recommended` with a few pragmatic
-adjustments so it passes on the current markup while still catching real
-breakage:
+## Coverage gate
 
-- `void-style: off` — self-closing void elements (`<meta />`, `<input />`) are
-  valid HTML5; not a battle worth fighting.
-- `no-inline-style`, `no-implicit-input-type`, `aria-label-misuse` set to
-  `warn` — surfaced but non-blocking while the UI is mid-redesign.
+`vitest.config.js` gates `lib.js` at a floor (statements/functions/lines 90,
+branches 85). It's a regression guard, not a target — `lib.js` is fully covered
+today. `app.js` is deliberately out of scope for unit tests: it's DOM/event
+wiring, exercised by running the app, not in isolation.
 
-Tighten these to `error` once the redesigned / extracted markup settles.
+## Notable config choices
+
+- **fallow ignores CSS** (`ignorePatterns: ["**/*.css"]`): fallow is a JS/TS
+  analyzer and can't see that `index.html` links `styles.css`, so it would
+  otherwise report the stylesheet as an unused file.
+- **fallow's `health` (complexity/CRAP) is not gated**: `app.js` is intentionally
+  untested DOM code, which inflates CRAP. The gate is scoped to the dead-code +
+  duplication checks; `npm run health` gives the complexity report on demand.
+- **Biome CSS rules `noImportantStyles` and `noDescendingSpecificity` are off**:
+  the `!important` rules are the deliberate reduced-motion accessibility
+  overrides, and descending-specificity is noisy on hand-authored CSS.
+- **html-validate** relaxes a few opinionated rules (`void-style` off; inline
+  style / implicit input type / aria-label misuse as warnings) so it passes on
+  the current markup while still catching real structural breakage.

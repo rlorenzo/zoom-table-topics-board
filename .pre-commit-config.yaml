@@ -67,30 +67,35 @@ repos:
         stages: [pre-push]
 
       # --- Web tooling (HTML / CSS / JS) ---------------------------------
-      # Rust-native binaries (biome, fallow) + html-validate, run through
-      # pre-commit-managed node envs — no package.json / node_modules in the
-      # repo. These stay dormant until the inline <script>/<style> in
-      # index.html is extracted into app.js / styles.css; see
+      # Driven by package.json devDependencies — run `npm install` once (the
+      # Node-side counterpart to `uv sync`). CI runs these in a dedicated node
+      # job via `npm run`; these hooks give the same checks locally. The CI
+      # Python job skips them (SKIP=...) since it has no node_modules. See
       # docs/web-tooling.md.
       - id: biome
         name: biome (js/css lint + format)
-        entry: biome check --write --no-errors-on-unmatched
-        language: node
-        additional_dependencies: ["@biomejs/biome@2.4.16"]
+        entry: npx --no-install biome check --write --no-errors-on-unmatched
+        language: system
         types_or: [javascript, jsx, ts, tsx, css]
 
       - id: html-validate
         name: html-validate (html structure / a11y)
-        entry: html-validate
-        language: node
-        additional_dependencies: ["html-validate@11.5.2"]
+        entry: npx --no-install html-validate
+        language: system
         types: [html]
 
+      - id: vitest
+        name: vitest (front-end unit tests)
+        entry: npx --no-install vitest run
+        language: system
+        pass_filenames: false
+        files: \.(js|mjs|cjs)$
+        stages: [pre-push]
+
       - id: fallow
-        name: fallow (dead code, duplication, complexity)
-        entry: fallow audit --base main
-        language: node
-        additional_dependencies: ["fallow@2.88.3"]
+        name: fallow (dead code + duplication)
+        entry: npx --no-install fallow --skip health
+        language: system
         pass_filenames: false
         types_or: [javascript, jsx, ts, tsx]
         stages: [pre-push]

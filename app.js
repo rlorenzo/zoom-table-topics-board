@@ -1,0 +1,751 @@
+import {
+  clearStoredTopics,
+  eligibleNames,
+  escapeHtml,
+  fmtTime,
+  loadStoredTopics,
+  parsePaste,
+  saveStoredTopics,
+} from "./lib.js";
+
+// ---- icons (inline so a single file ships) -----------------------
+const ICON_X = `<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>`;
+const ICON_EDIT = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5l2.5 2.5M9.5 4L3 10.5V13h2.5L12 6.5z"/></svg>`;
+const ICON_TRASH = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5h10M6 4.5V3h4v1.5M5 4.5l.6 8h4.8l.6-8"/></svg>`;
+const ICON_REOPEN = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8a5 5 0 1 1 1.5 3.5M3 8V5M3 8h3"/></svg>`;
+const ICON_DONE = `<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>`;
+const ICON_PERSON = `<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="5" r="2.5"/><path d="M3.5 13a4.5 4.5 0 0 1 9 0"/></svg>`;
+const ICON_DOT = `<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="currentColor"/></svg>`;
+const ICON_OPEN = `<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="8" cy="8" r="4.5"/></svg>`;
+
+const $ = (id) => document.getElementById(id);
+const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ---- API ---------------------------------------------------------
+async function post(url, body) {
+  return fetch(url, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+// ---- state cache -------------------------------------------------
+let state = {
+  startedAt: Date.now(),
+  participants: [],
+  topics: [],
+  selected: null,
+  activeTopicId: null,
+};
+
+// ---- localStorage seed guard (topic storage lives in lib.js) -----
+let seededThisLoad = false;
+
+// ====================================================================
+//  RENDER  — derive the active view purely from snapshot state.
+//    activeTopicId != null  -> FOCUS
+//    selected != null       -> PICKING
+//    else                   -> BOARD
+// ====================================================================
+// The id of a topic that just transitioned to "done" this snapshot, so the
+// board can give it a one-shot completion animation.
+let justDoneId = null;
+
+// Completion firework: a spark burst in the Toastmasters palette erupting from
+// the finished card. Pure DOM, no library; particles self-remove.
+const BURST_COLORS = ["#f2df74", "#f6e58a", "#006094", "#004165", "#772432", "#ffffff"];
+function celebrateCard(cardEl) {
+  if (reduceMotion()) return;
+  const rect = cardEl.getBoundingClientRect();
+  const ox = rect.left + rect.width / 2;
+  const oy = rect.top + rect.height * 0.42;
+  const layer = document.createElement("div");
+  layer.className = "celebrate-layer";
+
+  const ring = document.createElement("div");
+  ring.className = "celebrate-ring";
+  ring.style.left = `${ox}px`;
+  ring.style.top = `${oy}px`;
+  layer.appendChild(ring);
+
+  const N = 26;
+  for (let i = 0; i < N; i++) {
+    const bit = document.createElement("i");
+    bit.className = `celebrate-bit${i % 3 === 0 ? " spark" : ""}`;
+    const angle = (Math.PI * 2 * i) / N + (Math.random() - 0.5) * 0.45;
+    const dist = 95 + Math.random() * 160;
+    const tx = Math.cos(angle) * dist;
+    const ty = Math.sin(angle) * dist + dist * 0.35; // slight gravity bias
+    const size = 6 + Math.random() * 7;
+    bit.style.left = `${ox}px`;
+    bit.style.top = `${oy}px`;
+    bit.style.width = bit.style.height = `${size.toFixed(1)}px`;
+    bit.style.background = BURST_COLORS[i % BURST_COLORS.length];
+    bit.style.setProperty("--tx", `${tx.toFixed(1)}px`);
+    bit.style.setProperty("--ty", `${ty.toFixed(1)}px`);
+    bit.style.setProperty("--rot", `${(Math.random() * 540 - 270).toFixed(0)}deg`);
+    bit.style.setProperty("--dur", `${(950 + Math.random() * 550).toFixed(0)}ms`);
+    bit.style.setProperty("--delay", `${(Math.random() * 70).toFixed(0)}ms`);
+    layer.appendChild(bit);
+  }
+
+  document.body.appendChild(layer);
+  setTimeout(() => layer.remove(), 1800);
+}
+
+function render(s) {
+  const prev = state;
+  state = s;
+
+  // Detect a single topic flipping to done (host hit "Done") -> celebrate it.
+  const wasDone = new Set((prev.topics || []).filter((t) => t.status === "done").map((t) => t.id));
+  const newlyDone = s.topics.filter((t) => t.status === "done" && !wasDone.has(t.id));
+  if (newlyDone.length === 1) justDoneId = newlyDone[0].id;
+
+  // Mirror the live indicator into both header / stage copies.
+  // (set elsewhere by the EventSource handlers)
+
+  const view = s.activeTopicId ? "focus" : s.selected ? "picking" : "board";
+
+  $("board").hidden = view !== "board";
+  $("stage").hidden = view !== "picking";
+  $("focus").hidden = view !== "focus";
+
+  // Leaving picking: tear down any in-flight reveal so re-picking the same
+  // person later (e.g. after Cancel) still triggers a fresh shuffle.
+  if (view !== "picking") {
+    clearShuffle();
+    clearTopicRoll();
+    $("stage").classList.remove("lit");
+    lastSelectedId = null;
+    revealActive = false;
+  }
+
+  if (view === "board") renderBoard(s);
+  else if (view === "picking") renderPicking(s);
+  else renderFocus(s);
+
+  // Persist the topic set whenever it changes, and one-time re-seed
+  // from localStorage if the server starts empty.
+  syncTopicStorage(s);
+}
+
+// ---- topic localStorage sync + one-time re-seed ------------------
+function syncTopicStorage(s) {
+  const serverTopics = s.topics.map((t) => ({ headline: t.headline, details: t.details || "" }));
+
+  if (!seededThisLoad) {
+    // First snapshot this page load. If the server is empty, re-seed it once
+    // from whatever this browser remembered; otherwise adopt the server set.
+    seededThisLoad = true; // guard before the async call to avoid loops
+    if (serverTopics.length === 0) {
+      const stored = loadStoredTopics();
+      if (stored.length > 0) {
+        post("/api/topics", { topics: stored, replace: false });
+      }
+      return; // don't clobber the cache mid-reseed
+    }
+  }
+
+  // After the initial seed, mirror the server's set on every snapshot —
+  // INCLUDING when it becomes empty — so deleting the last topic isn't
+  // resurrected from a stale cache on the next reload.
+  saveStoredTopics(serverTopics);
+}
+
+// ---- topic card markup (shared by board + picking choices) -------
+function topicCard(t, opts) {
+  opts = opts || {};
+  const choose = !!opts.choose && t.status === "open";
+  const lockedOut = !!opts.pickMode && t.status !== "open";
+
+  const statusTag =
+    t.status === "done"
+      ? `<span class="status-tag">${ICON_DONE}Done</span>`
+      : t.status === "active"
+        ? `<span class="status-tag">${ICON_DOT}On now</span>`
+        : `<span class="status-tag">${ICON_OPEN}Open</span>`;
+
+  // The extra detail is a surprise: it stays hidden on open cards (the board
+  // and the picking choices) with no hint it exists, and only appears once
+  // the topic is chosen — in the full-screen focus view, and afterward on the
+  // done/active card.
+  const details =
+    t.details && t.status !== "open" ? `<div class="dt">${escapeHtml(t.details)}</div>` : "";
+
+  let assigneeBlock = "";
+  if (t.assignee) {
+    assigneeBlock = `<div class="assignee">${ICON_PERSON}<span class="who">${escapeHtml(t.assignee.name)}</span></div>`;
+  }
+
+  // Per-card affordances. Open cards (board only) get edit + remove.
+  // Done cards get a reopen link. None of these render in pick "choose" mode.
+  let tools = "";
+  let reopen = "";
+  if (!opts.pickMode) {
+    if (t.status === "open") {
+      tools =
+        `<div class="card-tools">` +
+        `<button class="tool" type="button" data-act="edit" data-tid="${t.id}" aria-label="Edit topic">${ICON_EDIT}</button>` +
+        `<button class="tool danger" type="button" data-act="remove-topic" data-tid="${t.id}" aria-label="Remove topic">${ICON_TRASH}</button>` +
+        `</div>`;
+    }
+    if (t.status === "done" || t.status === "active") {
+      reopen = `<button class="reopen-link" type="button" data-act="reopen" data-tid="${t.id}">${ICON_REOPEN}<span>Reopen</span></button>`;
+    }
+  }
+
+  const cls = ["card", t.status, choose ? "choose" : "", lockedOut ? "locked-out" : ""]
+    .filter(Boolean)
+    .join(" ");
+
+  const inner =
+    statusTag +
+    `<div class="hl">${escapeHtml(t.headline)}</div>` +
+    details +
+    assigneeBlock +
+    reopen;
+
+  if (choose) {
+    // A real button so it's keyboard-operable; click assigns the topic.
+    return `<button class="${cls}" type="button" data-act="assign" data-tid="${t.id}">${inner}</button>`;
+  }
+  // Static card (board open/active/done, or picking locked-out).
+  return `<div class="${cls}" data-tid="${t.id}">${tools}${inner}</div>`;
+}
+
+// ============================== BOARD ==============================
+function renderBoard(s) {
+  $("since").textContent = fmtTime(s.startedAt);
+
+  const present = s.participants.filter((p) => p.present);
+  const inRoom = present.length;
+  const answered = present.filter((p) => p.answered).length;
+  // Eligible "still to go" mirrors the server pool: present, not answered, not host.
+  const toGo = present.filter((p) => !p.answered && !p.is_host).length;
+  const tDone = s.topics.filter((t) => t.status === "done").length;
+  const tTotal = s.topics.length;
+
+  $("s-togo").textContent = toGo;
+  $("s-answered").textContent = answered;
+  $("s-room").textContent = inRoom;
+  $("s-tdone").textContent = tDone;
+  $("s-ttotal").textContent = tTotal;
+
+  // ---- topics ----
+  const host = $("topicsHost");
+  const openCount = s.topics.filter((t) => t.status === "open").length;
+  $("topicsAux").textContent = tTotal ? `${openCount} open · ${tDone} done` : "";
+
+  if (tTotal === 0) {
+    host.innerHTML = `<div class="topic-empty">
+           <h3>No topics yet</h3>
+           <p>They live only in this browser. Add one, or paste a whole list at once.</p>
+           <button class="btn" type="button" data-act="open-add">Add topics</button>
+         </div>`;
+  } else {
+    host.innerHTML = `<div class="topics">${s.topics.map((t) => topicCard(t, {})).join("")}</div>`;
+  }
+
+  // Celebrate the card that just became done (one render only).
+  if (justDoneId) {
+    const doneCard = host.querySelector(`.card.done[data-tid="${justDoneId}"]`);
+    if (doneCard && !reduceMotion()) {
+      requestAnimationFrame(() => {
+        doneCard.classList.add("just-done");
+        celebrateCard(doneCard);
+      });
+    }
+    justDoneId = null;
+  }
+
+  // ---- roster ----
+  renderRoster(s);
+
+  // ---- primary CTA enable/disable ----
+  // `toGo` (above) is exactly the pick-eligible pool — present, not answered,
+  // not host — so reuse it instead of recomputing the same filter.
+  const hasOpen = openCount > 0;
+  const btn = $("pickBtn");
+  const hint = $("pickHint");
+  btn.disabled = toGo === 0 || !hasOpen;
+  // No one left to pick: distinguish "the round is finished" (someone has
+  // answered) from "the room is still empty" (no one has) — not by whether
+  // topics exist, which mislabels an empty room that already has topics.
+  if (toGo === 0 && answered > 0) {
+    hint.textContent = "Everyone has had a topic.";
+  } else if (toGo === 0) {
+    hint.textContent = "Add people to the room first.";
+  } else if (!hasOpen) {
+    hint.textContent = "Add an open topic to pick.";
+  } else {
+    hint.textContent = "";
+  }
+}
+
+function renderRoster(s) {
+  const roster = $("roster");
+  if (!s.participants.length) {
+    roster.innerHTML = `<div class="empty" style="width:100%">No one yet. Joins appear automatically, or add someone below.</div>`;
+    return;
+  }
+  roster.innerHTML = s.participants
+    .map((p) => {
+      const cls = ["chip", p.answered ? "answered" : "", p.present ? "" : "left"]
+        .filter(Boolean)
+        .join(" ");
+      const stateIc = !p.present
+        ? ICON_DOT
+        : p.answered
+          ? `<span class="state-ic done">${ICON_DONE}</span>`
+          : `<span class="state-ic present">${ICON_OPEN}</span>`;
+      const hostPill = p.is_host ? `<span class="host-pill">host</span>` : "";
+      // Clicking a present name manually selects them (host included). Someone
+      // who already had their turn isn't selectable — same one-turn rule as the
+      // random roll, and the server rejects it anyway.
+      const canSelect = p.present && !p.answered;
+      const nameBtn =
+        `<button class="pick-name" type="button" ${canSelect ? "" : "disabled"} data-act="select" data-pid="${p.id}">` +
+        stateIc +
+        `<span class="who">${escapeHtml(p.name)}</span>` +
+        hostPill +
+        `</button>`;
+      const removeBtn = `<button class="x" type="button" data-act="remove-p" data-pid="${p.id}" aria-label="Remove ${escapeHtml(p.name)}">${ICON_X}</button>`;
+      return `<span class="${cls}">${nameBtn}${removeBtn}</span>`;
+    })
+    .join("");
+}
+
+// ============================= PICKING =============================
+let shuffleTimer = null;
+let shuffleTimeout = null;
+let lastSelectedId = null;
+let revealActive = false;
+
+function clearShuffle() {
+  if (shuffleTimer) {
+    clearInterval(shuffleTimer);
+    shuffleTimer = null;
+  }
+  if (shuffleTimeout) {
+    clearTimeout(shuffleTimeout);
+    shuffleTimeout = null;
+  }
+}
+
+// ---- Press-Your-Luck topic randomizer -----------------------------
+let topicRolling = false;
+let topicRollTimer = null;
+
+function clearTopicRoll() {
+  if (topicRollTimer) {
+    clearTimeout(topicRollTimer);
+    topicRollTimer = null;
+  }
+  topicRolling = false;
+  $("stage").classList.remove("rolling");
+  const rb = $("randomTopicBtn");
+  if (rb) rb.disabled = false;
+  const pa = $("pickAgainBtn");
+  if (pa) pa.disabled = false;
+  document
+    .querySelectorAll("#pickTopicsHost .card.flash, #pickTopicsHost .card.flash-final")
+    .forEach((c) => {
+      c.classList.remove("flash", "flash-final");
+    });
+}
+
+// Hop a highlight across the open topic boxes, decelerate, land on a random
+// open one, then assign it. Reduced motion skips straight to the pick.
+function randomizeTopic() {
+  if (topicRolling) return;
+  const cards = [...document.querySelectorAll("#pickTopicsHost .card.choose")];
+  if (!cards.length) return;
+  const targetIdx = Math.floor(Math.random() * cards.length);
+  const targetTid = cards[targetIdx].dataset.tid;
+
+  if (reduceMotion() || cards.length === 1) {
+    if (targetTid) post(`/api/topic/${targetTid}/assign`);
+    return;
+  }
+
+  topicRolling = true;
+  $("stage").classList.add("rolling");
+  $("randomTopicBtn").disabled = true;
+  $("pickAgainBtn").disabled = true;
+
+  const n = cards.length;
+  const totalSteps = n * 2 + targetIdx + 1; // ~2 loops, then settle on target
+  const minD = 70,
+    maxD = 360;
+  let step = 0;
+
+  const tick = () => {
+    cards.forEach((c) => {
+      c.classList.remove("flash");
+    });
+    const card = cards[step % n];
+    card.classList.add("flash");
+    step++;
+    if (step >= totalSteps) {
+      card.classList.add("flash-final");
+      topicRollTimer = setTimeout(() => {
+        topicRolling = false;
+        if (targetTid) post(`/api/topic/${targetTid}/assign`);
+      }, 520);
+      return;
+    }
+    const t = step / totalSteps; // quadratic ease-out deceleration
+    topicRollTimer = setTimeout(tick, minD + (maxD - minD) * t * t);
+  };
+  tick();
+}
+
+function renderPicking(s) {
+  const sel = s.selected;
+  $("stagePool").textContent = "";
+
+  // Render the open topic cards as the choice grid (always reflect state).
+  // While a Press-Your-Luck roll is animating, leave the grid in place so the
+  // highlight chase isn't wiped by an incoming snapshot.
+  if (!topicRolling) {
+    const choices = s.topics
+      .map((t) => topicCard(t, { pickMode: true, choose: t.status === "open" }))
+      .join("");
+    $("pickTopicsHost").innerHTML = s.topics.length
+      ? `<div class="topics">${choices}</div>`
+      : `<div class="empty" style="width:100%">No topics to assign. Cancel and add some first.</div>`;
+    $("randomTopicBtn").disabled = s.topics.filter((t) => t.status === "open").length === 0;
+  }
+
+  // Detect a NEW selection -> play the shuffle reveal.
+  const isNewSelection = sel && sel.id !== lastSelectedId;
+  lastSelectedId = sel ? sel.id : null;
+
+  if (isNewSelection) {
+    startReveal(s, sel);
+  } else if (!revealActive) {
+    // Re-render landing on an already-settled selection (e.g. a topic was
+    // removed while picking) — keep the settled UI without re-shuffling.
+    settleReveal(sel);
+  }
+}
+
+function startReveal(s, sel) {
+  revealActive = true;
+  clearShuffle();
+
+  const nameEl = $("shuffleName");
+  const label = $("shuffleLabel");
+  const spark = $("spark");
+  const banner = $("pickBanner");
+  const choicesBox = $("pickChoices");
+
+  // Reset staged elements.
+  label.textContent = "Rolling…";
+  label.style.visibility = "visible";
+  spark.classList.remove("show");
+  banner.classList.remove("show");
+  choicesBox.classList.remove("show");
+  nameEl.classList.remove("settled", "flourish");
+  $("stage").classList.remove("lit"); // dim the spotlight while rolling
+
+  if (reduceMotion()) {
+    // Skip straight to the settled name — motion is never the only carrier.
+    settleReveal(sel);
+    revealActive = false;
+    return;
+  }
+
+  // Cycle through eligible names rapidly, then settle on the real pick.
+  let pool = eligibleNames(s).filter((n) => n); // names only
+  if (!pool.length) pool = [sel.name];
+  nameEl.classList.add("cycling");
+
+  let i = 0;
+  const flash = () => {
+    nameEl.textContent = pool[i % pool.length];
+    i++;
+  };
+  flash();
+  shuffleTimer = setInterval(flash, 70);
+
+  // After ~1s, settle. Keep the handle so a rapid re-pick can cancel it —
+  // an orphaned timeout would settle on the previous person mid-animation.
+  shuffleTimeout = setTimeout(() => {
+    shuffleTimeout = null;
+    clearShuffle();
+    settleReveal(sel);
+    revealActive = false;
+  }, 1000);
+}
+
+function settleReveal(sel) {
+  clearShuffle();
+  const nameEl = $("shuffleName");
+  const label = $("shuffleLabel");
+  const spark = $("spark");
+  const banner = $("pickBanner");
+  const choicesBox = $("pickChoices");
+
+  nameEl.classList.remove("cycling");
+  nameEl.classList.add("settled");
+  nameEl.textContent = sel ? sel.name : "";
+  if (!reduceMotion()) {
+    // restart the pop animation
+    nameEl.classList.remove("flourish");
+    void nameEl.offsetWidth;
+    nameEl.classList.add("flourish");
+  }
+  label.textContent = "It's";
+  spark.classList.add("show");
+  banner.innerHTML = sel ? `<b>${escapeHtml(sel.name)}</b> is up. Pick a topic.` : "";
+  banner.classList.add("show");
+  choicesBox.classList.add("show");
+  $("stage").classList.add("lit"); // bloom the spotlight on the settled name
+}
+
+// ============================== FOCUS ==============================
+function renderFocus(s) {
+  const t = s.topics.find((x) => x.id === s.activeTopicId);
+  if (!t) return; // snapshot will correct itself
+  const who = t.assignee ? t.assignee.name : "";
+  $("focusName").textContent = who;
+  $("focusHeadline").textContent = t.headline;
+  const dt = $("focusDetails");
+  if (t.details) {
+    dt.textContent = t.details;
+    dt.hidden = false;
+  } else {
+    dt.textContent = "";
+    dt.hidden = true;
+  }
+  // Stash active id on the buttons for the click handlers.
+  $("focusDoneBtn").dataset.tid = t.id;
+  $("focusBackBtn").dataset.tid = t.id;
+}
+
+// ====================================================================
+//  EVENT WIRING
+// ====================================================================
+
+// ---- Board: primary CTA + reset + clear --------------------------
+$("pickBtn").addEventListener("click", () => {
+  if ($("pickBtn").disabled) return;
+  post("/api/pick", {});
+});
+$("resetBtn").addEventListener("click", () => {
+  if (
+    confirm("Start a new round? Topics and the roster are kept; everyone becomes eligible again.")
+  )
+    post("/api/reset");
+});
+$("clearTopicsBtn").addEventListener("click", () => {
+  if (!confirm("Clear all topics? This removes them from the board and your browser.")) return;
+  clearStoredTopics();
+  post("/api/topics", { topics: [], replace: true });
+});
+
+// ---- Add-topic tabs ----------------------------------------------
+function showTab(which) {
+  const single = which === "single";
+  $("tabSingle").classList.toggle("on", single);
+  $("tabPaste").classList.toggle("on", !single);
+  $("tabSingle").setAttribute("aria-selected", String(single));
+  $("tabPaste").setAttribute("aria-selected", String(!single));
+  $("singleForm").hidden = !single;
+  $("pasteForm").hidden = single;
+}
+$("tabSingle").addEventListener("click", () => showTab("single"));
+$("tabPaste").addEventListener("click", () => showTab("paste"));
+
+// ---- Add-topic editor toggle (collapsed by default) --------------
+function setAddOpen(open) {
+  $("addArea").hidden = !open;
+  $("addToggle").setAttribute("aria-expanded", String(open));
+  $("addToggleLabel").textContent = open ? "Hide topic editor" : "Add or edit topics";
+}
+function openAddEditor() {
+  setAddOpen(true);
+  $("addArea").scrollIntoView({
+    behavior: reduceMotion() ? "auto" : "smooth",
+    block: "nearest",
+  });
+  $("hl").focus();
+}
+$("addToggle").addEventListener("click", () => setAddOpen($("addArea").hidden));
+
+// ---- Add one topic -----------------------------------------------
+$("singleForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const headline = $("hl").value.trim();
+  if (!headline) {
+    $("hl").focus();
+    return;
+  }
+  const details = $("dt").value.trim();
+  $("hl").value = "";
+  $("dt").value = "";
+  $("hl").focus();
+  await post("/api/topic", { headline, details });
+});
+
+// ---- Paste many ---------------------------------------------------
+$("pasteForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const topics = parsePaste($("pasteBox").value);
+  const replace = $("pasteReplace").checked;
+  if (!topics.length && !replace) {
+    $("pasteBox").focus();
+    return;
+  }
+  $("pasteBox").value = "";
+  $("pasteReplace").checked = false;
+  await post("/api/topics", { topics, replace });
+});
+
+// ---- Roster: add / select / remove -------------------------------
+$("rosterAddForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = $("rosterAddName");
+  const name = input.value.trim();
+  if (!name) return;
+  input.value = "";
+  await post("/api/participant", { name });
+});
+
+// ---- Picking: actions --------------------------------------------
+$("pickAgainBtn").addEventListener("click", () => {
+  if ($("pickAgainBtn").disabled) return;
+  const ex = state.selected ? state.selected.id : null;
+  post("/api/pick", ex ? { exclude: ex } : {});
+});
+$("pickCancelBtn").addEventListener("click", () => {
+  // Stop any in-flight topic roll synchronously so its settle timer can't fire
+  // a late /assign that overrides this cancel before the server roundtrip lands.
+  clearTopicRoll();
+  post("/api/pick/cancel");
+});
+$("randomTopicBtn").addEventListener("click", randomizeTopic);
+
+// ---- Focus: done / back ------------------------------------------
+$("focusDoneBtn").addEventListener("click", () => {
+  const tid = $("focusDoneBtn").dataset.tid;
+  if (tid) post(`/api/topic/${tid}/done`);
+});
+$("focusBackBtn").addEventListener("click", () => {
+  const tid = $("focusBackBtn").dataset.tid;
+  if (tid) post(`/api/topic/${tid}/reopen`);
+});
+
+// ---- Global click delegation (topic cards, roster chips) ---------
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-act]");
+  if (!t) return;
+  const act = t.dataset.act;
+  const tid = t.dataset.tid;
+  const pid = t.dataset.pid;
+  switch (act) {
+    case "assign":
+      if (tid) post(`/api/topic/${tid}/assign`);
+      break;
+    case "reopen":
+      if (tid) post(`/api/topic/${tid}/reopen`);
+      break;
+    case "remove-topic":
+      if (tid && confirm("Remove this topic?")) post(`/api/topic/${tid}/remove`);
+      break;
+    case "edit":
+      if (tid) editTopic(tid);
+      break;
+    case "select":
+      if (pid) post("/api/select", { pid });
+      break;
+    case "remove-p":
+      if (pid) post(`/api/participant/${pid}/remove`);
+      break;
+    case "open-add":
+      openAddEditor();
+      break;
+  }
+});
+
+// Edit via a small on-brand dialog (native <dialog>: accessible, ESC-to-close,
+// and unaffected by the live grid re-render that would wipe an inline form).
+let editingTid = null;
+function editTopic(tid) {
+  const t = state.topics.find((x) => x.id === tid);
+  if (!t) return;
+  editingTid = tid;
+  $("editHl").value = t.headline;
+  $("editDt").value = t.details || "";
+  const d = $("editDialog");
+  if (typeof d.showModal === "function") d.showModal();
+  else d.setAttribute("open", "");
+  $("editHl").focus();
+  $("editHl").select();
+}
+// Mirror the showModal/open-attr guard used to open: on browsers without native
+// <dialog>, .close() is undefined and would throw, locking the UI.
+function closeEditDialog() {
+  editingTid = null;
+  const d = $("editDialog");
+  if (typeof d.close === "function") d.close();
+  else d.removeAttribute("open");
+}
+$("editForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const headline = $("editHl").value.trim();
+  if (!headline) {
+    $("editHl").focus();
+    return;
+  } // server rejects blank
+  const details = $("editDt").value.trim();
+  if (editingTid) post(`/api/topic/${editingTid}/edit`, { headline, details });
+  closeEditDialog();
+});
+$("editCancel").addEventListener("click", closeEditDialog);
+// Native <dialog> Escape/backdrop close bypasses closeEditDialog(); keep the
+// editingTid lifecycle correct no matter how the dialog goes away.
+$("editDialog").addEventListener("close", () => {
+  editingTid = null;
+});
+
+// ---- Keyboard: Escape cancels a pick -----------------------------
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!$("stage").hidden && state.selected) {
+    // Mirror the Cancel button: stop any in-flight topic roll synchronously so
+    // its settle timer can't fire a late /assign that overrides this cancel.
+    clearTopicRoll();
+    post("/api/pick/cancel");
+  }
+});
+
+// ====================================================================
+//  LIVE STREAM
+// ====================================================================
+function setLive(text, stale) {
+  for (const id of ["live", "live2"]) {
+    const el = $(id);
+    if (el) el.textContent = text;
+  }
+  for (const id of ["liveDot", "liveDot2"]) {
+    const el = $(id);
+    if (el) el.classList.toggle("stale", !!stale);
+  }
+}
+
+const es = new EventSource("/events");
+es.onmessage = (e) => {
+  let snap;
+  try {
+    snap = JSON.parse(e.data);
+  } catch {
+    return;
+  }
+  render(snap);
+};
+es.onerror = () => setLive("reconnecting", true);
+es.onopen = () => setLive("live", false);
