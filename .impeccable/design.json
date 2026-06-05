@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-04T12:00:00Z",
+  "title": "Design System: Table Topics",
+  "extensions": {
+    "colorMeta": {
+      "loyal-blue": {
+        "role": "primary",
+        "displayName": "Loyal Blue",
+        "canonical": "#004165",
+        "tonalRamp": ["#02131c", "#042a3d", "#00405f", "#004165", "#006094", "#4d8fb3", "#9cc3d8", "#dcecf3"]
+      },
+      "happy-yellow": {
+        "role": "secondary",
+        "displayName": "Happy Yellow",
+        "canonical": "#f2df74",
+        "tonalRamp": ["#3a3308", "#6b560f", "#9c8420", "#c9b23f", "#f2df74", "#f6e58a", "#faf0bf", "#fdf9e6"]
+      },
+      "true-maroon": {
+        "role": "tertiary",
+        "displayName": "True Maroon",
+        "canonical": "#772432",
+        "tonalRamp": ["#3b0104", "#5a121f", "#781327", "#772432", "#9c4452", "#c07785", "#ddacb5", "#f1dce0"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Loyal Ink",
+        "canonical": "#11252f",
+        "tonalRamp": ["#11252f", "#243640", "#3a4d56", "#54656d", "#8a979d", "#c5cccc", "#dde2e2", "#f5f6f6"]
+      },
+      "stage-bg": {
+        "role": "neutral",
+        "displayName": "Auditorium Blue",
+        "canonical": "#05202e",
+        "tonalRamp": ["#021019", "#05202e", "#0c2c3d", "#123a4e", "#1e4a60", "#356b85", "#88a3b0", "#bcd2dc"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display (Montserrat)", "purpose": "The shuffle name, focus prompt, wordmark, scoreboard numbers. Read from across the room." },
+      "body": { "displayName": "Body (Source Sans 3)", "purpose": "All operational UI: detail text, hints, labels, controls." }
+    },
+    "shadows": [
+      { "name": "ambient-small", "value": "0 1px 2px rgba(0,65,101,.06), 0 2px 6px rgba(0,65,101,.05)", "purpose": "Resting lift on stat tiles, active tab, active card." },
+      { "name": "hover-medium", "value": "0 10px 34px -16px rgba(0,65,101,.26)", "purpose": "A choosable topic card lifting on hover." },
+      { "name": "cta", "value": "0 6px 20px -8px rgba(0,65,101,.45)", "purpose": "The primary Pick button sits slightly proud." },
+      { "name": "spotlight-glow", "value": "0 0 52px rgba(242,223,116,.38)", "purpose": "The settled name's warm halo on the dark stage; the stage's only elevation, carried by light." }
+    ],
+    "motion": [
+      { "name": "t-fast", "value": "130ms", "purpose": "Hover/press feedback on controls." },
+      { "name": "t-med", "value": "220ms", "purpose": "State transitions, staged reveal fades." },
+      { "name": "t-slow", "value": "460ms", "purpose": "The spotlight bloom and focus settle." },
+      { "name": "ease", "value": "cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Default ease-out for most transitions." },
+      { "name": "ease-expo", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "The spotlight bloom and entrance reveals." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "520px" },
+      { "name": "md", "value": "760px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button (Pick)",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single most important board action: roll the next participant.",
+      "html": "<button class=\"ds-cta\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"3\"/><circle cx=\"8.5\" cy=\"8.5\" r=\"1.2\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"15.5\" cy=\"15.5\" r=\"1.2\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"12\" cy=\"12\" r=\"1.2\" fill=\"currentColor\" stroke=\"none\"/></svg><span>Pick next participant</span></button>",
+      "css": ".ds-cta { display: inline-flex; align-items: center; gap: 9px; font-family: 'Source Sans 3', system-ui, sans-serif; font-size: 0.9375rem; font-weight: 600; color: #fff; background: #004165; border: 1px solid transparent; border-radius: 11px; padding: 13px 22px; cursor: pointer; box-shadow: 0 6px 20px -8px rgba(0,65,101,.45); transition: background 130ms cubic-bezier(0.22,1,0.36,1), transform 130ms cubic-bezier(0.22,1,0.36,1), box-shadow 130ms; } .ds-cta svg { width: 18px; height: 18px; } .ds-cta:hover { background: #002f49; transform: translateY(-1px); box-shadow: 0 10px 26px -10px rgba(0,65,101,.55); } .ds-cta:active { transform: translateY(0); } .ds-cta:focus-visible { outline: 2px solid #004165; outline-offset: 3px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Form submits and editor actions; quieter than the blue CTA.",
+      "html": "<button class=\"ds-btn\">Add topic</button>",
+      "css": ".ds-btn { font-family: 'Source Sans 3', system-ui, sans-serif; font-size: 0.8125rem; font-weight: 600; color: #fff; background: #11252f; border: 1px solid #11252f; border-radius: 7px; padding: 10px 16px; cursor: pointer; transition: background 130ms, border-color 130ms; } .ds-btn:hover { background: #3a4d56; border-color: #3a4d56; } .ds-btn:focus-visible { outline: 2px solid #004165; outline-offset: 2px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Tertiary actions (Add, New round); outlined and light.",
+      "html": "<button class=\"ds-btn-ghost\">New round</button>",
+      "css": ".ds-btn-ghost { font-family: 'Source Sans 3', system-ui, sans-serif; font-size: 0.8125rem; font-weight: 600; color: #3a4d56; background: #fff; border: 1px solid #c5cccc; border-radius: 7px; padding: 10px 16px; cursor: pointer; transition: background 130ms, color 130ms, border-color 130ms; } .ds-btn-ghost:hover { background: #f5f6f6; color: #11252f; } .ds-btn-ghost:focus-visible { outline: 2px solid #004165; outline-offset: 2px; }"
+    },
+    {
+      "name": "Topic Card (open)",
+      "kind": "card",
+      "refersTo": "topic-card",
+      "description": "An open topic on the board; becomes a big clickable target in picking mode.",
+      "html": "<div class=\"ds-card\"><span class=\"ds-status\"><svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" aria-hidden=\"true\"><circle cx=\"8\" cy=\"8\" r=\"4.5\"/></svg>Open</span><div class=\"ds-card-hl\">What is a small win you had this week?</div></div>",
+      "css": ".ds-card { display: flex; flex-direction: column; text-align: left; background: #fff; border: 1px solid #dde2e2; border-radius: 15px; padding: 15px 17px 14px; min-height: 118px; transition: border-color 130ms cubic-bezier(0.22,1,0.36,1), box-shadow 130ms, transform 220ms; } .ds-card:hover { border-color: #004165; box-shadow: 0 10px 34px -16px rgba(0,65,101,.26); transform: translateY(-3px); } .ds-status { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; font-family: 'Source Sans 3', system-ui, sans-serif; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #004165; background: #e7eef3; padding: 3px 9px 3px 7px; border-radius: 999px; margin-bottom: 11px; } .ds-status svg { width: 12px; height: 12px; } .ds-card-hl { font-family: 'Source Sans 3', system-ui, sans-serif; font-size: 1.05rem; font-weight: 600; line-height: 1.28; letter-spacing: -0.01em; color: #11252f; }"
+    },
+    {
+      "name": "Roster Chip",
+      "kind": "chip",
+      "refersTo": "status-open",
+      "description": "A present participant in the roster; click the name to hand them a topic.",
+      "html": "<span class=\"ds-chip\"><button class=\"ds-chip-name\"><svg viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" aria-hidden=\"true\"><circle cx=\"8\" cy=\"8\" r=\"4.5\"/></svg><span>Priya Nair</span></button></span>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1px solid #c5cccc; border-radius: 999px; padding: 5px 12px; } .ds-chip-name { display: inline-flex; align-items: center; gap: 7px; background: none; border: 0; padding: 0; cursor: pointer; font-family: 'Source Sans 3', system-ui, sans-serif; font-size: 0.875rem; font-weight: 600; color: #11252f; } .ds-chip-name svg { width: 13px; height: 13px; color: #004165; } .ds-chip-name:hover { color: #004165; } .ds-chip-name:focus-visible { outline: 2px solid #004165; outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Roster and topic entry fields; Loyal Blue focus glow.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Add someone manually…\" aria-label=\"Add participant\" />",
+      "css": ".ds-input { font-family: 'Source Sans 3', system-ui, sans-serif; font-size: 0.9375rem; color: #11252f; background: #fff; border: 1px solid #c5cccc; border-radius: 7px; padding: 11px 14px; width: 100%; transition: border-color 130ms, box-shadow 130ms; } .ds-input::placeholder { color: #54656d; } .ds-input:focus { outline: none; border-color: #004165; box-shadow: 0 0 0 3px #cfe0ea; }"
+    },
+    {
+      "name": "Spotlight Reveal (signature)",
+      "kind": "custom",
+      "refersTo": "focus-headline",
+      "description": "The settled name on the darkened stage: white Montserrat under a warm Happy Yellow spotlight bloom.",
+      "html": "<div class=\"ds-stage\"><div class=\"ds-spotlight\"></div><div class=\"ds-stage-label\">It's</div><div class=\"ds-stage-name\">Lena Hart</div><svg class=\"ds-glint\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M12 0c.55 6.4 5.8 11.45 12 12-6.4.55-11.45 5.6-12 12-.55-6.4-5.6-11.45-12-12C6.4 11.45 11.45 6.4 12 0z\"/></svg></div>",
+      "css": ".ds-stage { position: relative; display: flex; flex-direction: column; align-items: center; gap: 16px; background: #05202e; border-radius: 15px; padding: 56px 32px; overflow: hidden; } .ds-spotlight { position: absolute; left: 50%; top: 46%; width: 520px; height: 520px; transform: translate(-50%,-50%); border-radius: 50%; pointer-events: none; background: radial-gradient(circle at center, rgba(242,223,116,0.42) 0%, rgba(242,223,116,0.18) 28%, transparent 62%); filter: blur(6px); } .ds-stage-label { position: relative; font-family: 'Source Sans 3', system-ui, sans-serif; font-size: 0.875rem; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #f2df74; } .ds-stage-name { position: relative; font-family: 'Montserrat', system-ui, sans-serif; font-size: clamp(2.8rem, 9vw, 6rem); font-weight: 800; line-height: 1; letter-spacing: -0.035em; color: #f4fafc; text-shadow: 0 0 52px rgba(242,223,116,0.38); } .ds-glint { position: relative; width: 40px; height: 40px; color: #f6e58a; filter: drop-shadow(0 0 10px rgba(242,223,116,0.6)); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Center Stage",
+    "overview": "A tool with two temperaments. The host's board is calm preparation at the lectern: a white, composed control surface where a facilitator queues people and prompts without fumbling. The pick reveal and full-screen focus view are the moment of stepping into the light: the room dims to a deep Loyal Blue auditorium and a warm Happy Yellow spotlight finds the speaker. It is built on the Toastmasters International brand (Loyal Blue, Happy Yellow, True Maroon; Montserrat and Source Sans 3 standing in for Gotham and Myriad Pro), and should read as credibly Toastmasters to a club officer and as a confident modern tool to anyone else.",
+    "keyCharacteristics": [
+      "Two surfaces, two temperaments: a quiet white board, a theatrical dark-blue stage.",
+      "The spotlight is the signature: a Happy Yellow bloom that only fires when a name settles.",
+      "Brand-exact color: every brand value is the literal hex from the Toastmasters manual.",
+      "Built to be read from the back row: large Montserrat display, high contrast on both surfaces.",
+      "Calm by default, loud on cue: motion and color are reserved for the reveal."
+    ],
+    "rules": [
+      { "name": "The One Light Rule", "body": "Happy Yellow is the spotlight and nothing else. It appears at the reveal and on the dark stage; it never becomes a button, a card fill, or a body color. Its scarcity is what makes the reveal feel like a reveal.", "section": "colors" },
+      { "name": "The Brand-Exact Rule", "body": "Loyal Blue is #004165, Happy Yellow is #f2df74, True Maroon is #772432, full stop. These are the Toastmasters manual's literal values and must not be re-tinted or nudged toward a custom hue.", "section": "colors" },
+      { "name": "The Display-Is-For-The-Room Rule", "body": "Montserrat at display weight is reserved for the name, the prompt, the wordmark, and the scoreboard numbers, the things a remote room reads. Everything operational is Source Sans 3.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces rest flat. A shadow means interactive or just-changed (hover, lift, the reveal). If a shadow isn't earning a state, delete it.", "section": "elevation" },
+      { "name": "The Blue-Shadow Rule", "body": "Shadows are tinted Loyal Blue, never gray-black. A neutral drop shadow reads as a 2014 app; the blue tint keeps it in the brand.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use the literal Toastmasters hex values: Loyal Blue #004165, Happy Yellow #f2df74, True Maroon #772432, Cool Gray #a9b2b1.",
+      "Do keep Happy Yellow for the spotlight and highlights only; let Loyal Blue carry actions and structure.",
+      "Do pair Montserrat (display) with Source Sans 3 (body) as the free stand-ins for Gotham and Myriad Pro.",
+      "Do keep body and placeholder text at Muted (#54656d) or darker for >=4.5:1; on the dark stage keep white-on-blue, never black-on-blue.",
+      "Do carry state with icon + word + color together, so open / on-now / done survive colorblindness and a low-quality screen share.",
+      "Do tint shadows Loyal Blue; keep the board flat until a state earns a lift.",
+      "Do leave a clean header slot where the official Toastmasters logo could be placed for official club use."
+    ],
+    "donts": [
+      "Don't recreate, redraw, or customize the Toastmasters globe logo, and don't invent a club logo or tagline.",
+      "Don't put a patterned or colored glow behind the official logo if one is ever added; the yellow bloom belongs behind the speaker's name.",
+      "Don't re-tint or balance the brand colors, and don't introduce a non-brand accent.",
+      "Don't drift back toward the old cream-and-terracotta paper look, or any warm-neutral body background.",
+      "Don't go childish or gamified: no cartoon confetti, no bubbly oversized rounding, no game-show kitsch.",
+      "Don't turn the board into a dark hacker terminal, and don't reach for the generic cool-gray-cards-plus-safe-blue SaaS dashboard.",
+      "Don't let Happy Yellow carry text on a light surface; use Accent-Deep #6b560f for gold text instead.",
+      "Don't use border-left/border-right greater than 1px as a colored stripe, gradient-filled text, or decorative glassmorphism.",
+      "Don't use em dashes in UI copy."
+    ]
+  }
+}

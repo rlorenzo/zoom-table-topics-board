@@ -6,30 +6,94 @@
 <title>Table Topics</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
+  /* =====================================================================
+     Table Topics — "Spotlight" design system
+     Two surfaces, two temperaments: a calm white control board, and a dark
+     twilight-auditorium stage where a warm spotlight finds the speaker.
+     ===================================================================== */
   :root {
-    --paper:     #faf7f2;
-    --surface:   #f3eee5;
-    --hairline:  #ddd3c2;
-    --soft-line: #c8bca6;
-    --muted-ink: #807666;
-    --dim-ink:   #4a4036;
-    --ink:       #28201a;
-    --clay:      #c9573a;
-    --clay-deep: #a44128;
+    /* Type — Toastmasters: Gotham→Montserrat (display), Myriad Pro→Source Sans 3 (body) */
+    --font-display: "Montserrat", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-ui: "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
 
-    --rounded-xs: 6px;
-    --rounded-sm: 10px;
-    --rounded-md: 14px;
+    /* Toastmasters brand colours — exact values per Brand Manual v2.0 */
+    --loyal-blue:    #004165;
+    --blissful-blue: #006094;
+    --true-maroon:   #772432;
+    --rich-maroon:   #781327;
+    --deep-maroon:   #3b0104;
+    --cool-gray:     #a9b2b1;
+    --fair-gray:     #f5f5f5;
+    --happy-yellow:  #f2df74;
 
-    --t-fast:   140ms cubic-bezier(0.22, 1, 0.36, 1);
-    --t-medium: 200ms cubic-bezier(0.22, 1, 0.36, 1);
+    /* Light surfaces — the host's control board */
+    --page:      #edf1f4;   /* soft off-white page; gentler than pure white */
+    --bg:        #ffffff;
+    --surface:   #f5f6f6;
+    --surface-2: #eceeef;
+    --line:      #dde2e2;
+    --line-2:    #c5cccc;
 
-    font-family: "Geist", "Inter", system-ui, sans-serif;
+    /* Ink ramp — Loyal-Blue-tinted neutrals (ink ≥7:1 on white) */
+    --ink:       #11252f;
+    --ink-soft:  #3a4d56;
+    --muted:     #54656d;
+    --faint:     #8a979d;
+
+    /* Brand — Loyal Blue carries primary actions + selection */
+    --primary:        #004165;
+    --primary-press:  #002f49;
+    --primary-ink:    #004165;
+    --primary-tint:   #e7eef3;
+    --primary-tint-2: #cfe0ea;
+    --on-primary:     #ffffff;
+
+    /* Accent — Happy Yellow is the spotlight / highlight */
+    --accent:       #f2df74;
+    --accent-glow:  #f6e58a;
+    --accent-deep:  #6b560f;   /* readable gold for text on a light-yellow fill */
+    --accent-tint:  #fbf4d4;
+
+    /* Maroon — secondary brand accent + destructive caution */
+    --danger:       #772432;
+    --danger-line:  #e3ccd1;
+
+    /* Stage — the darkened auditorium (deep Loyal Blue) */
+    --stage-bg:     #05202e;
+    --stage-deep:   #021019;
+    --stage-card:   #0c2c3d;
+    --stage-card-2: #123a4e;
+    --stage-line:   #1e4a60;
+    --stage-ink:    #f4fafc;
+    --stage-soft:   #bcd2dc;
+    --stage-muted:  #88a3b0;
+
+    /* Radii */
+    --r-xs: 7px; --r-sm: 11px; --r-md: 15px; --r-lg: 22px; --r-pill: 999px;
+
+    /* Shadows (Loyal-Blue-tinted) */
+    --shadow-sm:  0 1px 2px rgba(0,65,101,.06), 0 2px 6px rgba(0,65,101,.05);
+    --shadow-md:  0 10px 34px -16px rgba(0,65,101,.26);
+    --shadow-pop: 0 22px 60px -24px rgba(0,65,101,.42);
+    --shadow-cta: 0 6px 20px -8px rgba(0,65,101,.45);
+
+    /* Semantic z-scale */
+    --z-stage: 50; --z-focus: 60;
+
+    /* Motion */
+    --t-fast: 130ms; --t-med: 220ms; --t-slow: 460ms;
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+    color-scheme: light;
+    font-family: var(--font-ui);
+    accent-color: var(--primary);
   }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  *, *::before, *::after { box-sizing: border-box; }
+  * { margin: 0; padding: 0; }
 
   /* The `hidden` attribute must always win over a class's display rule —
      the view containers (.stage/.focus) set display:flex, which would
@@ -37,104 +101,130 @@
      board when no topic is active. */
   [hidden] { display: none !important; }
 
-  html, body { background: var(--paper); }
+  html, body { background: var(--page); }
   body {
     color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 0.9375rem;
+    line-height: 1.5;
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    font-size: 0.9375rem;
-    line-height: 1.5;
+    text-rendering: optimizeLegibility;
   }
 
-  button { font-family: inherit; }
+  button, input, textarea { font-family: inherit; }
+  ::selection { background: var(--primary-tint-2); color: var(--ink); }
 
-  .wrap { max-width: 980px; margin: 0 auto; padding: 5vh 5vw; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: clamp(28px, 5vh, 56px) clamp(20px, 5vw, 48px); }
+
+  /* View transitions: each page state eases in when it becomes visible, so
+     board <-> picking <-> focus never snap. Reduced motion zeroes these. */
+  #board:not([hidden]) { animation: board-in 400ms var(--ease) both; }
+  @keyframes board-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
 
   /* ============================================================= BOARD */
   /* Header --------------------------------------------------------- */
-  header { margin-bottom: 28px; }
+  header { margin-bottom: 30px; }
 
   .meta {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 14px;
-    font-size: 0.8125rem; color: var(--muted-ink);
+    display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+    font-size: 0.8125rem; color: var(--muted);
   }
-  .meta b { color: var(--dim-ink); font-weight: 500; }
-  .meta .sep { color: var(--hairline); }
+  .meta b { color: var(--ink-soft); font-weight: 600; }
+  .meta .sep { color: var(--line-2); }
 
   .dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--clay); flex: none;
-    box-shadow: 0 0 0 0 rgba(201, 87, 58, .45);
-    animation: pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+    --pulse: 0, 65, 101; /* Loyal Blue on the board; overridden to yellow on the dark stage */
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--primary); flex: none;
+    box-shadow: 0 0 0 0 rgba(var(--pulse), .5);
+    animation: pulse 2.6s var(--ease) infinite;
   }
-  .dot.stale { background: var(--soft-line); animation: none; box-shadow: none; }
+  .dot.stale { background: var(--faint); animation: none; box-shadow: none; }
   @keyframes pulse {
-    70% { box-shadow: 0 0 0 9px rgba(201, 87, 58, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(201, 87, 58, 0); }
+    0%   { box-shadow: 0 0 0 0 rgba(var(--pulse), .5); }
+    70%  { box-shadow: 0 0 0 8px rgba(var(--pulse), 0); }
+    100% { box-shadow: 0 0 0 0 rgba(var(--pulse), 0); }
   }
 
   .titlebar {
-    display: flex; align-items: baseline; justify-content: space-between;
-    gap: 16px; margin-top: 18px;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 20px; margin-top: 16px;
   }
   h1.app-title {
-    font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em;
+    font-family: var(--font-display);
+    font-size: clamp(1.6rem, 1.2rem + 1.3vw, 2.15rem);
+    font-weight: 700; letter-spacing: -0.025em; line-height: 1;
     color: var(--ink);
+    display: flex; align-items: center; gap: 13px;
   }
+  /* Brand mark: a simple microphone (the activity itself), in Loyal Blue.
+     Deliberately NOT the Toastmasters globe logo — the Brand Manual prohibits
+     recreating or customizing the official logo. */
+  .brandmark { width: 26px; height: 26px; flex: none; color: var(--loyal-blue); }
 
   /* Primary CTA --------------------------------------------------- */
   .cta {
-    font-family: inherit;
+    font-family: var(--font-ui);
     font-size: 0.9375rem; font-weight: 600;
-    letter-spacing: 0.01em;
     padding: 13px 22px;
-    border-radius: var(--rounded-sm);
-    border: 1px solid var(--clay-deep);
-    background: var(--clay); color: #fff;
+    border-radius: var(--r-sm);
+    border: 1px solid transparent;
+    background: var(--primary); color: var(--on-primary);
     cursor: pointer;
     display: inline-flex; align-items: center; gap: 9px;
-    transition: background var(--t-fast), border-color var(--t-fast),
-                transform var(--t-fast), opacity var(--t-fast);
+    box-shadow: var(--shadow-cta);
+    transition: background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease),
+                box-shadow var(--t-fast) var(--ease), opacity var(--t-fast);
     flex: none;
   }
-  .cta:hover { background: var(--clay-deep); border-color: var(--clay-deep); }
-  .cta:active { transform: translateY(1px); }
-  .cta:focus-visible { outline: 2px solid var(--clay); outline-offset: 3px; }
+  .cta:hover { background: var(--primary-press); transform: translateY(-1px);
+    box-shadow: 0 10px 26px -10px rgba(0,65,101,.55); }
+  .cta:active { transform: translateY(0); }
+  .cta:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
   .cta:disabled {
-    background: var(--surface); color: var(--soft-line);
-    border-color: var(--hairline);
+    background: var(--surface-2); color: var(--faint);
+    border-color: var(--line);
+    box-shadow: none; transform: none;
     cursor: not-allowed;
   }
-  .cta .dice { width: 17px; height: 17px; }
+  .cta .dice { width: 18px; height: 18px; }
 
   .cta-hint {
-    font-size: 0.8125rem; color: var(--muted-ink);
-    margin-top: 8px; text-align: right;
+    font-size: 0.8125rem; color: var(--muted);
+    margin-top: 9px; text-align: right; min-height: 1.2em;
   }
 
-  /* Stats ---------------------------------------------------------- */
+  /* Stats — a calm scoreboard ------------------------------------- */
   .stats {
     display: grid; grid-template-columns: repeat(5, 1fr);
-    gap: 10px; margin: 24px 0 30px;
+    gap: 10px; margin: 26px 0 34px;
   }
   .stat {
     background: var(--surface);
-    border-radius: var(--rounded-sm);
-    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    padding: 15px 16px 13px;
   }
+  /* "Still to go" is the count that drives the activity — give it weight. */
+  .stat:first-child { background: var(--primary-tint); border-color: var(--primary-tint-2); }
+  .stat:first-child .n { color: var(--primary-ink); }
   .stat .n {
-    font-family: "Geist Mono", ui-monospace, monospace;
-    font-size: 1.875rem; font-weight: 500;
-    line-height: 1; letter-spacing: -0.01em;
+    font-family: var(--font-display);
+    font-size: 1.9rem; font-weight: 700;
+    line-height: 1; letter-spacing: -0.02em;
     font-feature-settings: 'tnum' 1;
     color: var(--ink);
   }
   .stat .l {
-    margin-top: 9px;
-    font-size: 0.6875rem; font-weight: 500;
-    letter-spacing: 0.04em;
-    color: var(--muted-ink);
+    margin-top: 8px;
+    font-size: 0.6875rem; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted);
   }
 
   /* Section heads -------------------------------------------------- */
@@ -143,18 +233,18 @@
     gap: 12px; margin: 0 0 14px;
   }
   .section-head h2 {
-    font-size: 0.8125rem; font-weight: 600;
-    letter-spacing: 0.06em; text-transform: uppercase;
-    color: var(--muted-ink);
+    font-size: 0.78rem; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-soft);
   }
   .section-head .aux {
-    font-size: 0.8125rem; color: var(--muted-ink);
+    font-size: 0.8125rem; color: var(--muted);
   }
 
   /* Topic grid ----------------------------------------------------- */
   .topics {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(244px, 1fr));
     gap: 12px; margin-bottom: 14px;
   }
 
@@ -162,13 +252,13 @@
     position: relative;
     display: flex; flex-direction: column;
     text-align: left;
-    background: var(--paper);
-    border: 1px solid var(--hairline);
-    border-radius: var(--rounded-md);
-    padding: 16px 18px 14px;
-    min-height: 116px;
-    transition: border-color var(--t-fast), background var(--t-fast),
-                box-shadow var(--t-fast), transform var(--t-medium);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 15px 17px 14px;
+    min-height: 118px;
+    transition: border-color var(--t-fast) var(--ease), background var(--t-fast),
+                box-shadow var(--t-fast) var(--ease), transform var(--t-med) var(--ease);
   }
 
   /* Open cards in PICKING mode are big clickable buttons. */
@@ -179,145 +269,213 @@
     cursor: pointer;
   }
   button.card.choose:hover {
-    border-color: var(--clay);
-    box-shadow: 0 4px 16px -8px rgba(164, 65, 40, 0.5);
-    transform: translateY(-2px);
+    border-color: var(--primary);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-3px);
   }
   button.card.choose:focus-visible {
-    outline: 2px solid var(--clay); outline-offset: 3px;
+    outline: 2px solid var(--primary); outline-offset: 3px;
   }
 
+  /* Board cards lift gently on hover, where the edit / remove tools live. */
+  #board .card:hover { border-color: var(--line-2); box-shadow: var(--shadow-sm); }
+
+  /* Status pill: colour + icon + word, so state never rides on hue alone. */
   .card .status-tag {
     display: inline-flex; align-items: center; gap: 6px;
     align-self: flex-start;
-    font-size: 0.625rem; font-weight: 600;
-    letter-spacing: 0.07em; text-transform: uppercase;
-    color: var(--muted-ink);
-    margin-bottom: 9px;
+    font-size: 0.66rem; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface);
+    padding: 3px 9px 3px 7px; border-radius: var(--r-pill);
+    margin-bottom: 11px;
   }
   .card .status-tag .ic { width: 12px; height: 12px; }
 
   .card .hl {
-    font-size: 1.0625rem; font-weight: 600;
-    line-height: 1.25; letter-spacing: -0.01em;
+    font-family: var(--font-ui);
+    font-size: 1.05rem; font-weight: 600;
+    line-height: 1.28; letter-spacing: -0.01em;
     color: var(--ink);
     overflow-wrap: anywhere;
   }
   .card .dt {
     margin-top: 7px;
     font-size: 0.875rem; line-height: 1.45;
-    color: var(--dim-ink);
+    color: var(--ink-soft);
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
     overflow: hidden;
     overflow-wrap: anywhere;
   }
 
   /* open */
-  .card.open .status-tag { color: var(--clay); }
+  .card.open .status-tag { color: var(--primary-ink); background: var(--primary-tint); }
 
   /* active (rare on the board; the focus view normally takes over) */
   .card.active {
-    border-color: var(--clay);
-    background: oklch(96% 0.018 38);
+    border-color: var(--accent);
+    background: var(--accent-tint);
+    box-shadow: var(--shadow-sm);
   }
-  .card.active .status-tag { color: var(--clay-deep); }
+  .card.active .status-tag { color: var(--accent-deep); background: var(--accent-tint); }
 
-  /* done — grayed + locked */
+  /* done — recede + locked */
   .card.done {
     background: var(--surface);
-    border-color: var(--hairline);
+    border-color: var(--line);
   }
-  .card.done .hl { color: var(--dim-ink); }
-  .card.done .status-tag { color: var(--muted-ink); }
-  .card.done .assignee { color: var(--muted-ink); }
+  .card.done .hl { color: var(--ink-soft); }
+  .card.done .status-tag { color: var(--muted); background: var(--surface-2); }
+  .card.done .assignee { color: var(--muted); }
+
+  /* Completion delight: the just-finished card takes a quick warm "applause"
+     beat — a Happy-Yellow glow, a check that stamps in, a gentle pop — then
+     recedes into its calm gray done state. JS adds .just-done for one render;
+     reduced motion skips it entirely (the done card is already the default). */
+  .card.done.just-done { animation: done-pop 560ms var(--ease); }
+  .card.done.just-done .status-tag { animation: done-tag 1150ms var(--ease) both; }
+  .card.done.just-done .status-tag .ic { animation: done-check 560ms var(--ease) 60ms both; }
+  @keyframes done-pop {
+    0%   { transform: scale(0.975); box-shadow: 0 0 0 0 rgba(242,223,116,0); }
+    30%  { transform: scale(1.025);
+           box-shadow: 0 0 0 3px rgba(242,223,116,0.6), 0 0 34px -2px rgba(242,223,116,0.65); }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(242,223,116,0); }
+  }
+  @keyframes done-tag {
+    0%, 55% { color: var(--accent-deep); background: var(--accent-tint); }
+    100%    { color: var(--muted); background: var(--surface-2); }
+  }
+  @keyframes done-check {
+    0%   { transform: scale(0) rotate(-18deg); opacity: 0; }
+    60%  { transform: scale(1.3) rotate(0); opacity: 1; }
+    100% { transform: scale(1) rotate(0); }
+  }
+
+  /* Completion firework: a brand-colour spark burst + shockwave ring erupting
+     from the finished card. Crisp sparks in Toastmasters colours, not cartoon
+     confetti. JS spawns it; reduced motion skips it (the glow above remains). */
+  .celebrate-layer { position: fixed; inset: 0; pointer-events: none; z-index: 40; overflow: hidden; }
+  .celebrate-bit {
+    position: fixed; display: block; border-radius: 50%;
+    transform: translate(-50%, -50%) scale(0.3); opacity: 0;
+    animation: burst var(--dur, 1100ms) var(--ease-expo) var(--delay, 0ms) forwards;
+    will-change: transform, opacity;
+  }
+  .celebrate-bit.spark {
+    border-radius: 0;
+    clip-path: polygon(50% 0%, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0% 50%, 39% 39%);
+  }
+  @keyframes burst {
+    0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+    14%  { opacity: 1; }
+    100% { opacity: 0;
+           transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(1) rotate(var(--rot)); }
+  }
+  .celebrate-ring {
+    position: fixed; width: 16px; height: 16px; border-radius: 50%;
+    transform: translate(-50%, -50%) scale(0.3);
+    border: 4px solid var(--accent); opacity: 0.9;
+    animation: ring-flash 640ms var(--ease-expo) forwards;
+  }
+  @keyframes ring-flash {
+    0%   { opacity: 0.85; transform: translate(-50%, -50%) scale(0.3); border-width: 4px; }
+    100% { opacity: 0;    transform: translate(-50%, -50%) scale(7);   border-width: 0.5px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .celebrate-layer { display: none !important; }
+  }
 
   /* picking: non-open cards read as unavailable */
-  .card.locked-out { opacity: 0.5; }
+  .card.locked-out { opacity: 0.45; filter: saturate(0.6); }
 
   .card .assignee {
-    margin-top: auto; padding-top: 10px;
+    margin-top: auto; padding-top: 11px;
     display: flex; align-items: center; gap: 6px;
-    font-size: 0.8125rem; color: var(--dim-ink);
+    font-size: 0.8125rem; color: var(--ink-soft);
   }
-  .card .assignee .who { font-weight: 500; }
-  .card .assignee .ic { width: 13px; height: 13px; color: var(--muted-ink); flex: none; }
+  .card .assignee .who { font-weight: 600; }
+  .card .assignee .ic { width: 14px; height: 14px; color: var(--muted); flex: none; }
 
   /* per-card affordances (edit / remove / reopen) */
   .card-tools {
-    position: absolute; top: 10px; right: 10px;
-    display: flex; gap: 2px;
-    opacity: 0;
-    transition: opacity var(--t-fast);
+    position: absolute; top: 9px; right: 9px;
+    display: flex; gap: 3px;
+    opacity: 0; transform: translateY(-2px);
+    transition: opacity var(--t-fast), transform var(--t-fast) var(--ease);
   }
   .card:hover .card-tools,
-  .card:focus-within .card-tools { opacity: 1; }
+  .card:focus-within .card-tools { opacity: 1; transform: none; }
   .card-tools .tool {
-    background: var(--paper); border: 1px solid var(--hairline);
-    color: var(--muted-ink);
-    width: 26px; height: 26px;
+    background: var(--bg); border: 1px solid var(--line);
+    color: var(--muted);
+    width: 27px; height: 27px;
     display: inline-flex; align-items: center; justify-content: center;
-    border-radius: var(--rounded-xs); cursor: pointer;
+    border-radius: var(--r-xs); cursor: pointer;
     transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
   }
-  .card-tools .tool:hover { color: var(--ink); border-color: var(--soft-line); background: var(--surface); }
-  .card-tools .tool.danger:hover { color: var(--clay-deep); }
-  .card-tools .tool:focus-visible { outline: 2px solid var(--clay); outline-offset: 1px; }
+  .card-tools .tool:hover { color: var(--ink); border-color: var(--line-2); background: var(--surface); }
+  .card-tools .tool.danger:hover { color: var(--danger); border-color: var(--danger-line); }
+  .card-tools .tool:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
   .card-tools .tool svg { width: 13px; height: 13px; }
-  .card.done .card-tools { opacity: 1; }
 
   .reopen-link {
-    margin-top: 10px;
+    margin-top: 11px;
     align-self: flex-start;
-    background: none; border: 0; padding: 4px 0;
-    font-size: 0.75rem; font-weight: 500; letter-spacing: 0.03em;
-    color: var(--muted-ink); cursor: pointer;
+    background: none; border: 0; padding: 5px 0;
+    font-size: 0.78rem; font-weight: 600; letter-spacing: 0.01em;
+    color: var(--muted); cursor: pointer;
     display: inline-flex; align-items: center; gap: 5px;
-    border-radius: var(--rounded-xs);
-    transition: color var(--t-fast);
+    border-radius: var(--r-xs);
+    opacity: 0; pointer-events: none; /* only on hover/focus; space stays reserved */
+    transition: color var(--t-fast), opacity var(--t-fast);
   }
-  .reopen-link:hover { color: var(--clay-deep); }
-  .reopen-link:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
-  .reopen-link svg { width: 12px; height: 12px; }
+  .card:hover .reopen-link,
+  .card:focus-within .reopen-link { opacity: 1; pointer-events: auto; }
+  .reopen-link:hover { color: var(--primary-ink); }
+  .reopen-link:focus-visible { opacity: 1; outline: 2px solid var(--primary); outline-offset: 2px; }
+  .reopen-link svg { width: 13px; height: 13px; }
 
   /* Add topics ----------------------------------------------------- */
   /* Topic editor is tucked at the bottom behind a toggle. ----------- */
-  .add-section { margin: 30px 0 8px; }
+  .add-section { margin: 32px 0 8px; }
   .add-toggle {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: none; border: 1px dashed var(--soft-line);
-    color: var(--muted-ink);
-    font-size: 0.8125rem; font-weight: 500; letter-spacing: 0.02em;
-    padding: 9px 16px; border-radius: var(--rounded-sm);
+    display: inline-flex; align-items: center; gap: 9px;
+    background: none; border: 1px dashed var(--line-2);
+    color: var(--muted);
+    font-size: 0.8125rem; font-weight: 600;
+    padding: 10px 16px; border-radius: var(--r-sm);
     cursor: pointer;
-    transition: border-color var(--t-fast), color var(--t-fast);
+    transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast);
   }
-  .add-toggle:hover { border-color: var(--clay); color: var(--ink); }
-  .add-toggle:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
-  .add-toggle[aria-expanded="true"] { border-style: solid; color: var(--ink); }
+  .add-toggle:hover { border-color: var(--primary); color: var(--ink); background: var(--primary-tint); }
+  .add-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .add-toggle[aria-expanded="true"] { border-style: solid; border-color: var(--line-2); color: var(--ink); }
   .add-toggle-ic {
-    font-family: "Geist Mono", ui-monospace, monospace;
-    font-size: 1.0625rem; line-height: 1;
-    transition: transform var(--t-fast);
+    font-family: var(--font-ui);
+    font-size: 1.15rem; line-height: 1; display: inline-block;
+    transition: transform var(--t-med) var(--ease);
   }
-  .add-toggle[aria-expanded="true"] .add-toggle-ic { transform: rotate(45deg); }
+  .add-toggle[aria-expanded="true"] .add-toggle-ic { transform: rotate(135deg); }
 
   .add-area {
     background: var(--surface);
-    border-radius: var(--rounded-md);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
     padding: 18px 20px;
     margin: 12px 0 8px;
   }
   .add-tabs { display: flex; gap: 4px; margin-bottom: 14px; }
   .add-tab {
     background: none; border: 0; cursor: pointer;
-    font-size: 0.8125rem; font-weight: 500; letter-spacing: 0.02em;
-    color: var(--muted-ink);
-    padding: 6px 12px; border-radius: 999px;
-    transition: background var(--t-fast), color var(--t-fast);
+    font-size: 0.8125rem; font-weight: 600;
+    color: var(--muted);
+    padding: 7px 13px; border-radius: var(--r-pill);
+    transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
   }
   .add-tab:hover { color: var(--ink); }
-  .add-tab.on { background: var(--paper); color: var(--ink); }
-  .add-tab:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+  .add-tab.on { background: var(--bg); color: var(--primary-ink); box-shadow: var(--shadow-sm); }
+  .add-tab:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
   .single-form { display: flex; flex-direction: column; gap: 10px; }
   .single-form .row1 { display: flex; gap: 10px; }
@@ -327,26 +485,26 @@
   input, textarea {
     font-family: inherit; font-size: 0.9375rem;
     color: var(--ink);
-    background: var(--paper);
-    border: 1px solid var(--hairline);
-    padding: 11px 14px; border-radius: var(--rounded-xs);
+    background: var(--bg);
+    border: 1px solid var(--line-2);
+    padding: 11px 14px; border-radius: var(--r-xs);
     width: 100%; min-width: 0;
-    transition: border-color var(--t-fast);
+    transition: border-color var(--t-fast), box-shadow var(--t-fast);
   }
-  input::placeholder, textarea::placeholder { color: var(--muted-ink); }
-  input:focus, textarea:focus { outline: none; border-color: var(--clay); }
+  input::placeholder, textarea::placeholder { color: var(--muted); }
+  input:focus, textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-tint-2); }
   textarea { resize: vertical; line-height: 1.5; }
 
   .paste-form { display: flex; flex-direction: column; gap: 10px; }
-  .paste-form textarea { min-height: 130px; font-size: 0.875rem; }
+  .paste-form textarea { min-height: 132px; font-size: 0.875rem; }
   .paste-hint {
-    font-size: 0.75rem; color: var(--muted-ink); line-height: 1.5;
+    font-size: 0.75rem; color: var(--muted); line-height: 1.5;
   }
   .paste-hint code {
-    font-family: "Geist Mono", ui-monospace, monospace;
-    font-size: 0.75rem; background: var(--paper);
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 0.75rem; background: var(--bg);
     padding: 1px 5px; border-radius: 4px;
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--line); color: var(--ink-soft);
   }
 
   .form-actions {
@@ -355,267 +513,443 @@
   .form-actions .spacer { flex: 1; }
   .form-actions label.repl {
     display: inline-flex; align-items: center; gap: 7px;
-    font-size: 0.8125rem; color: var(--muted-ink); cursor: pointer;
+    font-size: 0.8125rem; color: var(--muted); cursor: pointer;
   }
 
   .btn {
-    font-family: inherit;
-    font-size: 0.8125rem; font-weight: 500;
-    letter-spacing: 0.02em;
+    font-family: var(--font-ui);
+    font-size: 0.8125rem; font-weight: 600;
     padding: 10px 16px;
-    border-radius: var(--rounded-xs);
+    border-radius: var(--r-xs);
     border: 1px solid var(--ink);
-    background: var(--ink); color: var(--paper);
+    background: var(--ink); color: var(--bg);
     cursor: pointer;
     transition: background var(--t-fast), border-color var(--t-fast),
                 color var(--t-fast), opacity var(--t-fast);
   }
-  .btn:hover { background: var(--dim-ink); border-color: var(--dim-ink); }
-  .btn:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+  .btn:hover { background: var(--ink-soft); border-color: var(--ink-soft); }
+  .btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .btn.ghost {
-    background: var(--paper); color: var(--dim-ink);
-    border-color: var(--hairline);
+    background: var(--bg); color: var(--ink-soft);
+    border-color: var(--line-2);
   }
-  .btn.ghost:hover { background: var(--surface); color: var(--ink); border-color: var(--soft-line); }
+  .btn.ghost:hover { background: var(--surface); color: var(--ink); border-color: var(--line-2); }
   .btn.quiet {
-    background: none; color: var(--muted-ink); border-color: transparent;
-    padding: 10px 10px;
+    background: none; color: var(--muted); border-color: transparent;
+    padding: 10px 12px;
   }
-  .btn.quiet:hover { background: var(--surface); color: var(--clay-deep); border-color: transparent; }
+  .btn.quiet:hover { background: var(--surface); color: var(--ink); border-color: transparent; }
 
   /* Empty topic state --------------------------------------------- */
   .topic-empty {
-    border: 1px dashed var(--soft-line);
-    border-radius: var(--rounded-md);
-    padding: 40px 32px;
+    border: 1px dashed var(--line-2);
+    border-radius: var(--r-md);
+    padding: 44px 32px;
     text-align: center;
     margin-bottom: 18px;
+    background: var(--surface);
   }
   .topic-empty h3 {
-    font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em;
+    font-family: var(--font-display);
+    font-size: 1.4rem; font-weight: 700; letter-spacing: -0.015em;
     color: var(--ink); margin-bottom: 8px;
   }
-  .topic-empty p { color: var(--muted-ink); max-width: 38ch; margin: 0 auto; }
-  .topic-empty .btn { margin-top: 18px; }
+  .topic-empty p { color: var(--muted); max-width: 42ch; margin: 0 auto; line-height: 1.5; }
+  .topic-empty .btn {
+    margin-top: 18px;
+    background: var(--primary); border-color: var(--primary); color: var(--on-primary);
+  }
+  .topic-empty .btn:hover { background: var(--primary-press); border-color: var(--primary-press); }
 
   /* Roster (secondary) -------------------------------------------- */
-  .roster-section { margin-top: 38px; }
+  .roster-section { margin-top: 40px; }
   .roster {
     display: flex; flex-wrap: wrap; gap: 8px;
   }
   .chip {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: var(--paper);
-    border: 1px solid var(--hairline);
-    border-radius: 999px;
-    padding: 6px 8px 6px 13px;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--bg);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-pill);
+    padding: 5px 7px 5px 12px;
     transition: border-color var(--t-fast), background var(--t-fast);
   }
-  .chip.answered { background: var(--surface); border-color: var(--hairline); }
-  .chip.left { opacity: 0.55; }
+  .chip.answered { background: var(--surface); border-color: var(--line); }
+  .chip.left { opacity: 0.5; }
   .chip .pick-name {
     background: none; border: 0; padding: 0; cursor: pointer;
-    font: inherit; font-size: 0.875rem; font-weight: 500;
+    font: inherit; font-size: 0.875rem; font-weight: 600;
     color: var(--ink);
     display: inline-flex; align-items: center; gap: 7px;
-    border-radius: var(--rounded-xs);
+    border-radius: var(--r-xs);
   }
-  .chip.answered .pick-name { color: var(--muted-ink); }
-  .chip .pick-name:hover { color: var(--clay-deep); }
+  .chip.answered .pick-name { color: var(--muted); font-weight: 500; }
+  .chip .pick-name:hover { color: var(--primary-ink); }
   .chip .pick-name:disabled { cursor: default; }
   .chip .pick-name:disabled:hover { color: inherit; }
-  .chip .pick-name:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+  .chip .pick-name:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
   .chip .state-ic { width: 13px; height: 13px; flex: none; }
-  .chip .state-ic.present { color: var(--clay); }
-  .chip .state-ic.done { color: var(--muted-ink); }
-  .chip.left .state-ic { color: var(--soft-line); }
+  .chip .state-ic.present { color: var(--primary); }
+  .chip .state-ic.done { color: var(--muted); }
+  .chip.left .state-ic { color: var(--faint); }
   .chip .host-pill {
-    font-size: 0.625rem; font-weight: 600;
-    letter-spacing: 0.06em; text-transform: lowercase;
-    color: var(--clay);
+    font-size: 0.6rem; font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    color: #fff; background: var(--true-maroon);
+    padding: 2px 6px; border-radius: var(--r-pill);
   }
   .chip .x {
     background: none; border: 0; padding: 3px;
-    color: var(--soft-line); cursor: pointer;
+    color: var(--faint); cursor: pointer;
     display: inline-flex; align-items: center;
     border-radius: 50%;
     transition: color var(--t-fast), background var(--t-fast);
   }
-  .chip .x:hover { color: var(--clay-deep); background: var(--surface); }
-  .chip .x:focus-visible { outline: 2px solid var(--clay); outline-offset: 1px; }
+  .chip .x:hover { color: var(--danger); background: var(--surface); }
+  .chip .x:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
   .roster-add {
     display: flex; align-items: center; gap: 8px;
-    margin-top: 14px; max-width: 360px;
+    margin-top: 14px; max-width: 380px;
   }
 
   .empty {
-    color: var(--muted-ink); padding: 28px 0;
+    color: var(--muted); padding: 28px 0;
     text-align: center; font-size: 0.9375rem;
-    border: 1px dashed var(--hairline);
-    border-radius: var(--rounded-sm);
+    border: 1px dashed var(--line);
+    border-radius: var(--r-sm);
   }
 
   /* Footer --------------------------------------------------------- */
   footer {
-    margin-top: 40px; padding-top: 20px;
-    border-top: 1px solid var(--hairline);
+    margin-top: 44px; padding-top: 20px;
+    border-top: 1px solid var(--line);
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     justify-content: flex-end;
   }
   footer .spacer { flex: 1; }
-  footer .note { font-size: 0.75rem; color: var(--muted-ink); }
+  footer .note { font-size: 0.75rem; color: var(--muted); }
 
   /* ====================================================== PICKING view */
+  /* The stage is the darkened auditorium: house lights down, a warm
+     spotlight blooms (.stage.lit) when the name settles. */
   .stage {
-    position: fixed; inset: 0; z-index: 50;
-    background: var(--paper);
+    position: fixed; inset: 0; z-index: var(--z-stage);
+    background: var(--stage-bg); color: var(--stage-ink);
     display: flex; flex-direction: column;
-    padding: 4vh 5vw;
+    padding: clamp(20px, 4vh, 40px) clamp(20px, 5vw, 60px);
+    overflow: hidden;
   }
+  /* House lights down: the dark stage fades up over the soft-light board,
+     so the background visibly dims from light to dark instead of cutting. */
+  .stage:not([hidden]) { animation: lights-down 560ms var(--ease) both; }
+  @keyframes lights-down {
+    from { opacity: 0; transform: scale(1.02); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  /* Edge vignette pulls the eye to centre stage. */
+  .stage::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+    background: radial-gradient(120% 90% at 50% 42%, transparent 38%, var(--stage-deep) 100%);
+  }
+
+  /* The warm spotlight pool. */
+  .spotlight {
+    position: absolute; left: 50%; top: 42%;
+    width: min(118vw, 1100px); height: min(118vw, 1100px);
+    transform: translate(-50%, -50%) scale(0.82);
+    border-radius: 50%; pointer-events: none; z-index: 1;
+    background: radial-gradient(circle at center,
+      rgba(242,223,116,0.42) 0%, rgba(242,223,116,0.18) 28%, transparent 62%);
+    opacity: 0.5; filter: blur(6px);
+    transition: opacity var(--t-slow) var(--ease-expo), transform var(--t-slow) var(--ease-expo);
+  }
+  .stage.lit .spotlight { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 
   .stage-top {
+    position: relative; z-index: 2;
     display: flex; align-items: center; justify-content: space-between;
     gap: 14px;
-    font-size: 0.8125rem; color: var(--muted-ink);
+    font-size: 0.8125rem; color: var(--stage-muted);
   }
-  .stage-top .meta { margin: 0; }
+  .stage-top .meta { margin: 0; color: var(--stage-muted); }
+  .stage-top .meta b { color: var(--stage-soft); }
+  .stage-top .dot { --pulse: 242, 223, 116; background: var(--accent); } /* Happy Yellow on dark */
 
   .stage-mid {
+    position: relative; z-index: 2;
     flex: 1;
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     text-align: center;
-    gap: 18px;
+    gap: 20px;
     min-height: 0;
   }
 
   .shuffle-label {
-    font-size: 0.875rem; font-weight: 500;
-    letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--muted-ink);
+    font-size: 0.875rem; font-weight: 600;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--stage-muted);
+    transition: color var(--t-med) var(--ease);
   }
+  .stage.lit .shuffle-label { color: var(--accent); }
   .shuffle-name {
-    font-size: clamp(2.75rem, 9vw, 6.5rem);
-    font-weight: 700; line-height: 1.0;
-    letter-spacing: -0.03em;
-    color: var(--ink);
+    font-family: var(--font-display);
+    font-size: clamp(2.8rem, 9vw, 6rem);
+    font-weight: 800; line-height: 1.0;
+    letter-spacing: -0.035em;
+    color: var(--stage-ink);
     max-width: 16ch;
-    overflow-wrap: anywhere;
+    overflow-wrap: anywhere; text-wrap: balance;
   }
-  .shuffle-name.cycling { color: var(--muted-ink); }
+  .shuffle-name.cycling { color: var(--stage-muted); filter: blur(0.4px); opacity: 0.92; }
   .shuffle-name.settled {
-    color: var(--ink);
+    color: var(--stage-ink); filter: none; opacity: 1;
+    text-shadow: 0 0 52px rgba(242,223,116,0.38);
   }
   @keyframes name-pop {
-    0%   { transform: scale(0.92); }
-    55%  { transform: scale(1.06); }
+    0%   { transform: scale(0.9); }
+    55%  { transform: scale(1.05); }
     100% { transform: scale(1); }
   }
-  .shuffle-name.flourish { animation: name-pop 460ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .shuffle-name.flourish { animation: name-pop 480ms var(--ease); }
 
+  /* The landing glint — a crisp amber sparkle, not an emoji. */
   .spark {
-    font-size: clamp(1.5rem, 4vw, 2.5rem);
-    line-height: 1;
-    opacity: 0;
-    transition: opacity var(--t-medium);
+    width: clamp(28px, 5vw, 44px); height: clamp(28px, 5vw, 44px);
+    color: var(--accent-glow);
+    opacity: 0; transform: scale(0.4) rotate(-30deg);
+    filter: drop-shadow(0 0 10px rgba(242,223,116,0.6));
+    transition: opacity var(--t-med) var(--ease), transform var(--t-slow) var(--ease-expo);
   }
-  .spark.show { opacity: 1; }
+  .spark svg { width: 100%; height: 100%; display: block; }
+  .spark.show { opacity: 1; transform: scale(1) rotate(0); }
 
   .pick-banner {
-    font-size: clamp(1.125rem, 2.4vw, 1.6rem);
-    font-weight: 500; color: var(--dim-ink);
-    line-height: 1.3;
-    opacity: 0;
-    transition: opacity var(--t-medium);
+    font-size: clamp(1.05rem, 2.2vw, 1.5rem);
+    font-weight: 500; color: var(--stage-soft);
+    line-height: 1.35;
+    opacity: 0; transform: translateY(8px);
+    transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease);
   }
-  .pick-banner.show { opacity: 1; }
-  .pick-banner b { color: var(--ink); font-weight: 700; }
+  .pick-banner.show { opacity: 1; transform: none; }
+  .pick-banner b { color: var(--stage-ink); font-weight: 700; }
 
   .pick-choices {
-    width: 100%; max-width: 980px;
-    opacity: 0; pointer-events: none;
-    transition: opacity var(--t-medium);
+    width: 100%; max-width: 1000px;
+    opacity: 0; transform: translateY(10px); pointer-events: none;
+    transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease);
   }
-  .pick-choices.show { opacity: 1; pointer-events: auto; }
+  .pick-choices.show { opacity: 1; transform: none; pointer-events: auto; }
+  .pick-choices .section-head { justify-content: center; align-items: center; gap: 16px; margin-bottom: 16px; }
+  .pick-choices .section-head h2 { color: var(--stage-muted); }
   .pick-choices .topics { margin: 0; }
 
-  .stage-actions {
-    display: flex; align-items: center; justify-content: center;
-    gap: 12px; flex-wrap: wrap;
-    padding-top: 6px;
+  /* "Surprise me" — the Happy-Yellow randomizer trigger. Dark text on a pale
+     yellow fill is the one place yellow legibly carries text. */
+  .topic-random {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-ui); font-size: 0.8125rem; font-weight: 700; letter-spacing: 0.02em;
+    color: #06212e; background: var(--accent);
+    border: 1px solid var(--accent); border-radius: var(--r-pill);
+    padding: 8px 16px; cursor: pointer;
+    transition: background var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast), opacity var(--t-fast);
+  }
+  .topic-random:hover { background: var(--accent-glow); transform: translateY(-1px); box-shadow: 0 6px 18px -6px rgba(242,223,116,0.6); }
+  .topic-random:active { transform: none; }
+  .topic-random:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .topic-random:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+  .topic-random svg { width: 15px; height: 15px; }
+
+  /* Press-Your-Luck highlight chasing across the topic boxes. */
+  .stage.rolling .pick-choices .card { pointer-events: none; }
+  .stage .card.flash {
+    border-color: var(--accent);
+    background: var(--stage-card-2);
+    box-shadow: 0 0 0 2px var(--accent), 0 0 30px -4px rgba(242,223,116,0.7);
+    transform: translateY(-2px) scale(1.02);
+  }
+  .stage .card.flash-final {
+    border-color: var(--accent);
+    background: #16465c;
+    box-shadow: 0 0 0 3px var(--accent), 0 0 56px -2px rgba(242,223,116,0.95);
+    animation: topic-pop 460ms var(--ease);
+  }
+  @keyframes topic-pop {
+    0%   { transform: scale(1.04); }
+    45%  { transform: scale(1.08); }
+    100% { transform: scale(1.04); }
   }
 
+  /* Topic cards re-skinned for the dark stage; choosing glows amber. */
+  .stage .card { background: var(--stage-card); border-color: var(--stage-line); }
+  .stage .card .hl { color: var(--stage-ink); }
+  .stage .card .dt { color: var(--stage-soft); }
+  .stage .card .status-tag { background: var(--stage-card-2); color: var(--stage-muted); }
+  .stage .card.open .status-tag { color: var(--accent); background: rgba(242,223,116,0.14); }
+  .stage .card .assignee { color: var(--stage-soft); }
+  .stage .card .assignee .ic { color: var(--stage-muted); }
+  .stage button.card.choose:hover {
+    border-color: var(--accent);
+    background: var(--stage-card-2);
+    box-shadow: 0 0 0 1px var(--accent), 0 18px 44px -20px rgba(242,223,116,0.5);
+    transform: translateY(-3px);
+  }
+  .stage button.card.choose:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .stage .card.locked-out { opacity: 0.4; }
+  .stage .empty { color: var(--stage-muted); border-color: var(--stage-line); }
+
+  .stage-actions {
+    position: relative; z-index: 2;
+    display: flex; align-items: center; justify-content: center;
+    gap: 12px; flex-wrap: wrap;
+    padding-top: 8px;
+  }
+  /* Buttons on the dark stage. */
+  .stage .btn.ghost { background: var(--stage-card); color: var(--stage-soft); border-color: var(--stage-line); }
+  .stage .btn.ghost:hover { background: var(--stage-card-2); color: var(--stage-ink); border-color: var(--stage-muted); }
+  .stage .btn.quiet { color: var(--stage-muted); }
+  .stage .btn.quiet:hover { background: var(--stage-card); color: var(--stage-ink); }
+  .stage .btn:focus-visible { outline-color: var(--accent); }
+
   /* ======================================================== FOCUS view */
+  /* The speaker is up: same dark auditorium, one steady spotlight. */
   .focus {
-    position: fixed; inset: 0; z-index: 60;
-    background: var(--paper);
+    position: fixed; inset: 0; z-index: var(--z-focus);
+    background: var(--stage-bg); color: var(--stage-ink);
     display: flex; flex-direction: column;
-    padding: 5vh 6vw;
+    padding: clamp(28px, 5vh, 60px) clamp(24px, 6vw, 80px);
+    overflow: hidden;
+  }
+  .focus::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+    background: radial-gradient(120% 90% at 30% 38%, transparent 40%, var(--stage-deep) 100%);
+  }
+  .focus-glow {
+    position: absolute; left: 24%; top: 36%;
+    width: min(92vw, 920px); height: min(92vw, 920px);
+    transform: translate(-50%, -50%); border-radius: 50%;
+    pointer-events: none; z-index: 0;
+    background: radial-gradient(circle at center,
+      rgba(242,223,116,0.26) 0%, rgba(242,223,116,0.12) 30%, transparent 62%);
+    filter: blur(8px);
   }
   .focus-who {
-    font-size: clamp(1.25rem, 3vw, 2rem);
-    font-weight: 500;
-    letter-spacing: -0.01em;
-    color: var(--clay-deep);
-    margin-bottom: 3vh;
+    position: relative; z-index: 2;
+    margin-bottom: 3.5vh;
   }
   .focus-who .label {
     display: block;
-    font-size: 0.8125rem; font-weight: 600;
-    letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--muted-ink);
-    margin-bottom: 8px;
+    font-size: 0.8125rem; font-weight: 700;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+  #focusName {
+    font-family: var(--font-display);
+    font-size: clamp(1.5rem, 3.4vw, 2.4rem);
+    font-weight: 700; letter-spacing: -0.02em;
+    color: var(--accent-glow);
   }
   .focus-body {
+    position: relative; z-index: 2;
     flex: 1;
     display: flex; flex-direction: column; justify-content: center;
     min-height: 0;
   }
   .focus-headline {
-    font-size: clamp(2.5rem, 7vw, 6rem);
-    font-weight: 700; line-height: 1.04;
-    letter-spacing: -0.03em;
-    color: var(--ink);
-    overflow-wrap: anywhere;
+    font-family: var(--font-display);
+    font-size: clamp(2.4rem, 6.5vw, 6rem);
+    font-weight: 800; line-height: 1.05;
+    letter-spacing: -0.035em;
+    color: var(--stage-ink);
+    max-width: 18ch;
+    overflow-wrap: anywhere; text-wrap: balance;
   }
   .focus-details {
     margin-top: 3.5vh;
-    font-size: clamp(1.125rem, 2.6vw, 1.9rem);
-    font-weight: 400; line-height: 1.4;
-    letter-spacing: -0.005em;
-    color: var(--dim-ink);
-    max-width: 28ch;
-    overflow-wrap: anywhere;
+    font-size: clamp(1.1rem, 2.4vw, 1.8rem);
+    font-weight: 400; line-height: 1.45;
+    color: var(--stage-soft);
+    max-width: 32ch;
+    overflow-wrap: anywhere; text-wrap: pretty;
   }
   .focus-actions {
+    position: relative; z-index: 2;
     display: flex; align-items: center; gap: 16px;
-    margin-top: 4vh;
+    margin-top: 4.5vh;
   }
   .focus-done {
-    font-size: 1.0625rem; font-weight: 600;
-    padding: 16px 32px;
-    border-radius: var(--rounded-sm);
-    border: 1px solid var(--clay-deep);
-    background: var(--clay); color: #fff;
+    font-family: var(--font-ui);
+    font-size: 1.0625rem; font-weight: 700;
+    padding: 16px 34px;
+    border-radius: var(--r-sm);
+    border: 1px solid transparent;
+    background: var(--primary); color: var(--on-primary);
     cursor: pointer;
     display: inline-flex; align-items: center; gap: 10px;
+    box-shadow: 0 10px 30px -10px rgba(0,65,101,0.7);
     transition: background var(--t-fast), transform var(--t-fast);
   }
-  .focus-done:hover { background: var(--clay-deep); }
-  .focus-done:active { transform: translateY(1px); }
-  .focus-done:focus-visible { outline: 2px solid var(--clay); outline-offset: 3px; }
+  .focus-done:hover { background: var(--blissful-blue); transform: translateY(-1px); }
+  .focus-done:active { transform: none; }
+  .focus-done:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .focus-done svg { width: 19px; height: 19px; }
   .focus-back {
-    font-size: 0.9375rem; font-weight: 500;
-    background: none; border: 0; padding: 10px 6px;
-    color: var(--muted-ink); cursor: pointer;
-    border-radius: var(--rounded-xs);
+    font-family: var(--font-ui);
+    font-size: 0.9375rem; font-weight: 600;
+    background: none; border: 0; padding: 10px 8px;
+    color: var(--stage-muted); cursor: pointer;
+    border-radius: var(--r-xs);
     transition: color var(--t-fast);
   }
-  .focus-back:hover { color: var(--dim-ink); }
-  .focus-back:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+  .focus-back:hover { color: var(--stage-soft); }
+  .focus-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* A gentle settle as the prompt fills the room. */
+  .focus:not([hidden]) .focus-who,
+  .focus:not([hidden]) .focus-body { animation: focus-in var(--t-slow) var(--ease-expo) both; }
+  .focus:not([hidden]) .focus-body { animation-delay: 80ms; }
+  @keyframes focus-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  /* The spotlight blooms in with the prompt. */
+  .focus:not([hidden]) .focus-glow { animation: glow-in 720ms var(--ease-expo) both; }
+  @keyframes glow-in {
+    from { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+    to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  }
+
+  /* Edit dialog ---------------------------------------------------- */
+  .edit-dialog {
+    margin: auto; /* re-center: the global `* { margin: 0 }` reset kills the UA default */
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    padding: 0;
+    max-width: 460px; width: calc(100vw - 40px);
+    background: var(--bg); color: var(--ink);
+    box-shadow: var(--shadow-pop);
+  }
+  .edit-dialog::backdrop { background: rgba(5, 32, 46, 0.45); backdrop-filter: blur(2px); }
+  .edit-dialog[open] { animation: dialog-in 200ms var(--ease); }
+  @keyframes dialog-in {
+    from { opacity: 0; transform: translateY(10px) scale(0.98); }
+    to   { opacity: 1; transform: none; }
+  }
+  .edit-dialog form { display: flex; flex-direction: column; gap: 14px; padding: 22px 22px 20px; }
+  .edit-dialog-title {
+    font-family: var(--font-display);
+    font-size: 1.2rem; font-weight: 700; letter-spacing: -0.015em; color: var(--ink);
+  }
+  .edit-field { display: flex; flex-direction: column; gap: 6px; }
+  .edit-field span {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .edit-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+  .edit-dialog .btn[type="submit"] {
+    background: var(--primary); border-color: var(--primary); color: var(--on-primary);
+  }
+  .edit-dialog .btn[type="submit"]:hover { background: var(--primary-press); border-color: var(--primary-press); }
 
   /* Reduced motion ------------------------------------------------- */
   @media (prefers-reduced-motion: reduce) {
@@ -625,15 +959,16 @@
       transition-duration: 0.001ms !important;
     }
     .dot { animation: none; box-shadow: none; }
-    /* reveal the staged elements instantly */
-    .pick-banner, .pick-choices, .spark { transition: none; }
+    /* reveal the staged elements instantly; the spotlight is simply on */
+    .pick-banner, .pick-choices, .spark, .spotlight, .shuffle-name { transition: none; }
   }
 
   /* Narrow screens ------------------------------------------------- */
-  @media (max-width: 720px) {
+  @media (max-width: 760px) {
     .stats { grid-template-columns: repeat(3, 1fr); }
-    .stats .stat:nth-child(4), .stats .stat:nth-child(5) { grid-column: span 1; }
     .titlebar { flex-direction: column; align-items: stretch; }
+    .titlebar > div:last-child { display: flex; flex-direction: column; }
+    .cta { justify-content: center; }
     .cta-hint { text-align: left; }
   }
   @media (max-width: 520px) {
@@ -654,7 +989,7 @@
       <span>Started <b id="since">··</b></span>
     </div>
     <div class="titlebar">
-      <h1 class="app-title">Table Topics</h1>
+      <h1 class="app-title"><svg class="brandmark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v4M8.5 21h7"/></svg>Table Topics</h1>
       <div>
         <button class="cta" id="pickBtn" type="button">
           <svg class="dice" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -723,7 +1058,7 @@
           <textarea id="pasteBox" aria-label="Paste many topics, one per line"
             placeholder="One topic per line&#10;Use a pipe for details:&#10;&#10;What's a small win this week? | Keep it under a minute&#10;Describe your ideal weekend"></textarea>
           <div class="paste-hint">
-            One topic per line. Add details after a <code>|</code> &mdash; e.g.
+            One topic per line. Add details after a <code>|</code>. Example:
             <code>Headline | optional details</code>. Nothing is saved on the server.
           </div>
           <div class="form-actions">
@@ -737,7 +1072,7 @@
   </main>
 
   <footer>
-    <span class="note">Topics are remembered in this browser only &mdash; participants and matching reset when you stop.</span>
+    <span class="note">Topics are saved in this browser only. Participants and matching reset when you stop.</span>
     <div class="spacer"></div>
     <button class="btn quiet" id="clearTopicsBtn" type="button">Clear topics</button>
     <button class="btn ghost" id="resetBtn" type="button">New round</button>
@@ -746,6 +1081,7 @@
 
 <!-- ============================ PICKING ============================ -->
 <div class="stage" id="stage" hidden>
+  <div class="spotlight" id="spotlight" aria-hidden="true"></div>
   <div class="stage-top">
     <div class="meta">
       <span class="dot" id="liveDot2" aria-hidden="true"></span>
@@ -756,10 +1092,21 @@
   <div class="stage-mid">
     <div class="shuffle-label" id="shuffleLabel">Rolling&hellip;</div>
     <div class="shuffle-name" id="shuffleName" aria-live="off">&nbsp;</div>
-    <div class="spark" id="spark" aria-hidden="true">&#10024;</div>
+    <div class="spark" id="spark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0c.55 6.4 5.6 11.45 12 12-6.4.55-11.45 5.6-12 12-.55-6.4-5.6-11.45-12-12C6.4 11.45 11.45 6.4 12 0z"/></svg></div>
     <div class="pick-banner" id="pickBanner" role="status" aria-live="polite" aria-atomic="true"></div>
     <div class="pick-choices" id="pickChoices">
-      <div class="section-head"><h2>Pick their topic</h2></div>
+      <div class="section-head">
+        <h2>Pick their topic</h2>
+        <button class="topic-random" id="randomTopicBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="3"/>
+            <circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" stroke="none"/>
+            <circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/>
+            <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>
+          </svg>
+          <span>Surprise me</span>
+        </button>
+      </div>
       <div id="pickTopicsHost"></div>
     </div>
   </div>
@@ -771,6 +1118,7 @@
 
 <!-- ============================ FOCUS ============================ -->
 <div class="focus" id="focus" hidden>
+  <div class="focus-glow" aria-hidden="true"></div>
   <div class="focus-who">
     <span class="label">Up now</span>
     <span id="focusName">&nbsp;</span>
@@ -787,6 +1135,25 @@
     <button class="focus-back" id="focusBackBtn" type="button">Back</button>
   </div>
 </div>
+
+<!-- ============================ EDIT TOPIC ============================ -->
+<dialog class="edit-dialog" id="editDialog" aria-labelledby="editDialogTitle">
+  <form id="editForm" autocomplete="off">
+    <h2 class="edit-dialog-title" id="editDialogTitle">Edit topic</h2>
+    <label class="edit-field">
+      <span>Headline</span>
+      <input id="editHl" maxlength="160" aria-label="Topic headline" />
+    </label>
+    <label class="edit-field">
+      <span>Details (optional)</span>
+      <textarea id="editDt" rows="3" maxlength="600" aria-label="Topic details"></textarea>
+    </label>
+    <div class="edit-actions">
+      <button class="btn ghost" type="button" id="editCancel">Cancel</button>
+      <button class="btn" type="submit">Save changes</button>
+    </div>
+  </form>
+</dialog>
 
 <script>
   // ---- icons (inline so a single file ships) -----------------------
@@ -864,9 +1231,61 @@
   //    selected != null       -> PICKING
   //    else                   -> BOARD
   // ====================================================================
+  // The id of a topic that just transitioned to "done" this snapshot, so the
+  // board can give it a one-shot completion animation.
+  let justDoneId = null;
+
+  // Completion firework: a spark burst in the Toastmasters palette erupting from
+  // the finished card. Pure DOM, no library; particles self-remove.
+  const BURST_COLORS = ["#f2df74", "#f6e58a", "#006094", "#004165", "#772432", "#ffffff"];
+  function celebrateCard(cardEl) {
+    if (reduceMotion()) return;
+    const rect = cardEl.getBoundingClientRect();
+    const ox = rect.left + rect.width / 2;
+    const oy = rect.top + rect.height * 0.42;
+    const layer = document.createElement("div");
+    layer.className = "celebrate-layer";
+
+    const ring = document.createElement("div");
+    ring.className = "celebrate-ring";
+    ring.style.left = ox + "px";
+    ring.style.top = oy + "px";
+    layer.appendChild(ring);
+
+    const N = 26;
+    for (let i = 0; i < N; i++) {
+      const bit = document.createElement("i");
+      bit.className = "celebrate-bit" + (i % 3 === 0 ? " spark" : "");
+      const angle = (Math.PI * 2 * i) / N + (Math.random() - 0.5) * 0.45;
+      const dist = 95 + Math.random() * 160;
+      const tx = Math.cos(angle) * dist;
+      const ty = Math.sin(angle) * dist + dist * 0.35; // slight gravity bias
+      const size = 6 + Math.random() * 7;
+      bit.style.left = ox + "px";
+      bit.style.top = oy + "px";
+      bit.style.width = bit.style.height = size.toFixed(1) + "px";
+      bit.style.background = BURST_COLORS[i % BURST_COLORS.length];
+      bit.style.setProperty("--tx", tx.toFixed(1) + "px");
+      bit.style.setProperty("--ty", ty.toFixed(1) + "px");
+      bit.style.setProperty("--rot", (Math.random() * 540 - 270).toFixed(0) + "deg");
+      bit.style.setProperty("--dur", (950 + Math.random() * 550).toFixed(0) + "ms");
+      bit.style.setProperty("--delay", (Math.random() * 70).toFixed(0) + "ms");
+      layer.appendChild(bit);
+    }
+
+    document.body.appendChild(layer);
+    setTimeout(() => layer.remove(), 1800);
+  }
+
   function render(s) {
     const prev = state;
     state = s;
+
+    // Detect a single topic flipping to done (host hit "Done") -> celebrate it.
+    const wasDone = new Set(
+      (prev.topics || []).filter(t => t.status === "done").map(t => t.id));
+    const newlyDone = s.topics.filter(t => t.status === "done" && !wasDone.has(t.id));
+    if (newlyDone.length === 1) justDoneId = newlyDone[0].id;
 
     // Mirror the live indicator into both header / stage copies.
     // (set elsewhere by the EventSource handlers)
@@ -881,6 +1300,8 @@
     // person later (e.g. after Cancel) still triggers a fresh shuffle.
     if (view !== "picking") {
       clearShuffle();
+      clearTopicRoll();
+      $("stage").classList.remove("lit");
       lastSelectedId = null;
       revealActive = false;
     }
@@ -977,7 +1398,7 @@
       return `<button class="${cls}" type="button" data-act="assign" data-tid="${t.id}">${inner}</button>`;
     }
     // Static card (board open/active/done, or picking locked-out).
-    return `<div class="${cls}">${tools}${inner}</div>`;
+    return `<div class="${cls}" data-tid="${t.id}">${tools}${inner}</div>`;
   }
 
   // ============================== BOARD ==============================
@@ -1009,7 +1430,7 @@
       host.innerHTML =
         `<div class="topic-empty">
            <h3>No topics yet</h3>
-           <p>They live only in your browser — add one, or paste a whole list at once.</p>
+           <p>They live only in this browser. Add one, or paste a whole list at once.</p>
            <button class="btn" type="button" data-act="open-add">Add topics</button>
          </div>`;
     } else {
@@ -1017,18 +1438,34 @@
         `<div class="topics">${s.topics.map(t => topicCard(t, {})).join("")}</div>`;
     }
 
+    // Celebrate the card that just became done (one render only).
+    if (justDoneId) {
+      const doneCard = host.querySelector(`.card.done[data-tid="${justDoneId}"]`);
+      if (doneCard && !reduceMotion()) {
+        requestAnimationFrame(() => {
+          doneCard.classList.add("just-done");
+          celebrateCard(doneCard);
+        });
+      }
+      justDoneId = null;
+    }
+
     // ---- roster ----
     renderRoster(s);
 
     // ---- primary CTA enable/disable ----
-    const eligible = present.filter(p => !p.answered && !p.is_host).length;
+    // `toGo` (above) is exactly the pick-eligible pool — present, not answered,
+    // not host — so reuse it instead of recomputing the same filter.
     const hasOpen = openCount > 0;
     const btn = $("pickBtn");
     const hint = $("pickHint");
-    btn.disabled = eligible === 0 || !hasOpen;
-    if (eligible === 0 && tTotal > 0) {
+    btn.disabled = toGo === 0 || !hasOpen;
+    // No one left to pick: distinguish "the round is finished" (someone has
+    // answered) from "the room is still empty" (no one has) — not by whether
+    // topics exist, which mislabels an empty room that already has topics.
+    if (toGo === 0 && answered > 0) {
       hint.textContent = "Everyone has had a topic.";
-    } else if (eligible === 0) {
+    } else if (toGo === 0) {
       hint.textContent = "Add people to the room first.";
     } else if (!hasOpen) {
       hint.textContent = "Add an open topic to pick.";
@@ -1080,17 +1517,81 @@
     if (shuffleTimeout) { clearTimeout(shuffleTimeout); shuffleTimeout = null; }
   }
 
+  // ---- Press-Your-Luck topic randomizer -----------------------------
+  let topicRolling = false;
+  let topicRollTimer = null;
+
+  function clearTopicRoll() {
+    if (topicRollTimer) { clearTimeout(topicRollTimer); topicRollTimer = null; }
+    topicRolling = false;
+    $("stage").classList.remove("rolling");
+    const rb = $("randomTopicBtn"); if (rb) rb.disabled = false;
+    const pa = $("pickAgainBtn"); if (pa) pa.disabled = false;
+    document
+      .querySelectorAll("#pickTopicsHost .card.flash, #pickTopicsHost .card.flash-final")
+      .forEach(c => c.classList.remove("flash", "flash-final"));
+  }
+
+  // Hop a highlight across the open topic boxes, decelerate, land on a random
+  // open one, then assign it. Reduced motion skips straight to the pick.
+  function randomizeTopic() {
+    if (topicRolling) return;
+    const cards = [...document.querySelectorAll("#pickTopicsHost .card.choose")];
+    if (!cards.length) return;
+    const targetIdx = Math.floor(Math.random() * cards.length);
+    const targetTid = cards[targetIdx].dataset.tid;
+
+    if (reduceMotion() || cards.length === 1) {
+      if (targetTid) post(`/api/topic/${targetTid}/assign`);
+      return;
+    }
+
+    topicRolling = true;
+    $("stage").classList.add("rolling");
+    $("randomTopicBtn").disabled = true;
+    $("pickAgainBtn").disabled = true;
+
+    const n = cards.length;
+    const totalSteps = n * 2 + targetIdx + 1; // ~2 loops, then settle on target
+    const minD = 70, maxD = 360;
+    let step = 0;
+
+    const tick = () => {
+      cards.forEach(c => c.classList.remove("flash"));
+      const card = cards[step % n];
+      card.classList.add("flash");
+      step++;
+      if (step >= totalSteps) {
+        card.classList.add("flash-final");
+        topicRollTimer = setTimeout(() => {
+          topicRolling = false;
+          if (targetTid) post(`/api/topic/${targetTid}/assign`);
+        }, 520);
+        return;
+      }
+      const t = step / totalSteps; // quadratic ease-out deceleration
+      topicRollTimer = setTimeout(tick, minD + (maxD - minD) * t * t);
+    };
+    tick();
+  }
+
   function renderPicking(s, prev) {
     const sel = s.selected;
     $("stagePool").textContent = "";
 
     // Render the open topic cards as the choice grid (always reflect state).
-    const choices = s.topics.map(t =>
-      topicCard(t, { pickMode: true, choose: t.status === "open" })).join("");
-    $("pickTopicsHost").innerHTML =
-      s.topics.length
-        ? `<div class="topics">${choices}</div>`
-        : `<div class="empty" style="width:100%">No topics to assign. Cancel and add some first.</div>`;
+    // While a Press-Your-Luck roll is animating, leave the grid in place so the
+    // highlight chase isn't wiped by an incoming snapshot.
+    if (!topicRolling) {
+      const choices = s.topics.map(t =>
+        topicCard(t, { pickMode: true, choose: t.status === "open" })).join("");
+      $("pickTopicsHost").innerHTML =
+        s.topics.length
+          ? `<div class="topics">${choices}</div>`
+          : `<div class="empty" style="width:100%">No topics to assign. Cancel and add some first.</div>`;
+      $("randomTopicBtn").disabled =
+        s.topics.filter(t => t.status === "open").length === 0;
+    }
 
     // Detect a NEW selection -> play the shuffle reveal.
     const isNewSelection = sel && sel.id !== lastSelectedId;
@@ -1130,6 +1631,7 @@
     banner.classList.remove("show");
     choicesBox.classList.remove("show");
     nameEl.classList.remove("settled", "flourish");
+    $("stage").classList.remove("lit"); // dim the spotlight while rolling
 
     if (reduceMotion()) {
       // Skip straight to the settled name — motion is never the only carrier.
@@ -1181,10 +1683,11 @@
     label.textContent = "It's";
     spark.classList.add("show");
     banner.innerHTML = sel
-      ? `<b>${escapeHtml(sel.name)}</b> is up — pick their topic`
+      ? `<b>${escapeHtml(sel.name)}</b> is up. Pick a topic.`
       : "";
     banner.classList.add("show");
     choicesBox.classList.add("show");
+    $("stage").classList.add("lit"); // bloom the spotlight on the settled name
   }
 
   // ============================== FOCUS ==============================
@@ -1304,10 +1807,17 @@
 
   // ---- Picking: actions --------------------------------------------
   $("pickAgainBtn").addEventListener("click", () => {
+    if ($("pickAgainBtn").disabled) return;
     const ex = state.selected ? state.selected.id : null;
     post("/api/pick", ex ? { exclude: ex } : {});
   });
-  $("pickCancelBtn").addEventListener("click", () => post("/api/pick/cancel"));
+  $("pickCancelBtn").addEventListener("click", () => {
+    // Stop any in-flight topic roll synchronously so its settle timer can't fire
+    // a late /assign that overrides this cancel before the server roundtrip lands.
+    clearTopicRoll();
+    post("/api/pick/cancel");
+  });
+  $("randomTopicBtn").addEventListener("click", randomizeTopic);
 
   // ---- Focus: done / back ------------------------------------------
   $("focusDoneBtn").addEventListener("click", () => {
@@ -1339,22 +1849,51 @@
     }
   });
 
-  // Inline edit via prompt() — minimal, no modal, matches the calm tone.
+  // Edit via a small on-brand dialog (native <dialog>: accessible, ESC-to-close,
+  // and unaffected by the live grid re-render that would wipe an inline form).
+  let editingTid = null;
   function editTopic(tid) {
     const t = state.topics.find(x => x.id === tid);
     if (!t) return;
-    const headline = window.prompt("Edit topic headline:", t.headline);
-    if (headline === null) return;          // cancelled
-    if (!headline.trim()) return;           // server rejects blank; don't bother
-    const details = window.prompt("Edit details (leave blank for none):", t.details || "");
-    if (details === null) return;           // cancelled on second prompt
-    post(`/api/topic/${tid}/edit`, { headline: headline.trim(), details: details.trim() });
+    editingTid = tid;
+    $("editHl").value = t.headline;
+    $("editDt").value = t.details || "";
+    const d = $("editDialog");
+    if (typeof d.showModal === "function") d.showModal();
+    else d.setAttribute("open", "");
+    $("editHl").focus();
+    $("editHl").select();
   }
+  // Mirror the showModal/open-attr guard used to open: on browsers without native
+  // <dialog>, .close() is undefined and would throw, locking the UI.
+  function closeEditDialog() {
+    editingTid = null;
+    const d = $("editDialog");
+    if (typeof d.close === "function") d.close();
+    else d.removeAttribute("open");
+  }
+  $("editForm").addEventListener("submit", e => {
+    e.preventDefault();
+    const headline = $("editHl").value.trim();
+    if (!headline) { $("editHl").focus(); return; }   // server rejects blank
+    const details = $("editDt").value.trim();
+    if (editingTid) post(`/api/topic/${editingTid}/edit`, { headline, details });
+    closeEditDialog();
+  });
+  $("editCancel").addEventListener("click", closeEditDialog);
+  // Native <dialog> Escape/backdrop close bypasses closeEditDialog(); keep the
+  // editingTid lifecycle correct no matter how the dialog goes away.
+  $("editDialog").addEventListener("close", () => { editingTid = null; });
 
   // ---- Keyboard: Escape cancels a pick -----------------------------
   document.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
-    if (!$("stage").hidden && state.selected) post("/api/pick/cancel");
+    if (!$("stage").hidden && state.selected) {
+      // Mirror the Cancel button: stop any in-flight topic roll synchronously so
+      // its settle timer can't fire a late /assign that overrides this cancel.
+      clearTopicRoll();
+      post("/api/pick/cancel");
+    }
   });
 
   // ====================================================================
