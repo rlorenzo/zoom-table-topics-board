@@ -1103,6 +1103,15 @@ footer .note {
   font-size: 0.75rem;
   color: var(--muted);
 }
+.sponsor-bar {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+}
+.sponsor-bar .sponsor {
+  border: 0;
+  border-radius: 6px;
+}
 
 /* ====================================================== PICKING view */
 /* The stage is the darkened auditorium: house lights down, a warm
