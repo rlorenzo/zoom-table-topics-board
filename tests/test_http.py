@@ -126,6 +126,12 @@ class TestStaticAssets:
         assert ctype in content_type
         assert needle in raw
 
+    def test_serves_asset_with_query_string(self, server):
+        # A cache-buster query must still resolve to the static asset.
+        code, content_type, _ = _get_headers(server + "/app.js?v=1")
+        assert code == 200
+        assert "text/javascript" in content_type
+
     def test_missing_asset_returns_404(self, server, monkeypatch, tmp_path):
         # A configured asset whose file is missing 404s (not 500, unlike index).
         monkeypatch.setattr(

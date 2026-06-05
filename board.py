@@ -963,16 +963,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        if self.path == "/" or self.path.startswith("/index"):
+        # Route on the path component only, so a query string (e.g. a
+        # cache-buster like /app.js?v=1) still matches the static allowlist.
+        path = urlparse(self.path).path
+        if path == "/" or path.startswith("/index"):
             return self._serve_file(
                 INDEX_HTML, "text/html; charset=utf-8", (500, "index.html missing")
             )
 
-        asset = STATIC_FILES.get(self.path)
+        asset = STATIC_FILES.get(path)
         if asset is not None:
             return self._serve_file(asset[0], asset[1], (404, "not found"))
 
-        if self.path == "/events":
+        if path == "/events":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
