@@ -5,12 +5,16 @@ import {
   eligibleNames,
   escapeHtml,
   fmtTime,
+  initials,
+  loadOnboarded,
   loadStoredTopics,
   newlyDoneId,
   nextView,
   parsePaste,
   pickHint,
+  saveOnboarded,
   saveStoredTopics,
+  showWelcome,
   topicAux,
 } from "./lib.js";
 
@@ -48,6 +52,10 @@ let state = {
 // ---- localStorage seed guard (topic storage lives in lib.js) -----
 let seededThisLoad = false;
 
+// Whether this browser has seen the first-run welcome. Held in memory so a
+// dismiss re-renders instantly; mirrored to localStorage so it sticks.
+let onboarded = loadOnboarded();
+
 // ====================================================================
 //  RENDER  — derive the active view purely from snapshot state.
 //    activeTopicId != null  -> FOCUS
@@ -61,11 +69,10 @@ let justDoneId = null;
 // Completion firework: a spark burst in the Toastmasters palette erupting from
 // the finished card. Pure DOM, no library; particles self-remove.
 const BURST_COLORS = ["#f2df74", "#f6e58a", "#006094", "#004165", "#772432", "#ffffff"];
-function celebrateCard(cardEl) {
-  if (reduceMotion()) return;
-  const rect = cardEl.getBoundingClientRect();
-  const ox = rect.left + rect.width / 2;
-  const oy = rect.top + rect.height * 0.42;
+
+// A spark burst + shockwave ring centered on (ox, oy). Pure DOM; particles
+// self-remove. `scale` widens the spread for bigger moments (the reveal).
+function spawnBurst(ox, oy, { count = 26, scale = 1 } = {}) {
   const layer = document.createElement("div");
   layer.className = "celebrate-layer";
 
@@ -75,12 +82,11 @@ function celebrateCard(cardEl) {
   ring.style.top = `${oy}px`;
   layer.appendChild(ring);
 
-  const N = 26;
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < count; i++) {
     const bit = document.createElement("i");
     bit.className = `celebrate-bit${i % 3 === 0 ? " spark" : ""}`;
-    const angle = (Math.PI * 2 * i) / N + (Math.random() - 0.5) * 0.45;
-    const dist = 95 + Math.random() * 160;
+    const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.45;
+    const dist = (95 + Math.random() * 160) * scale;
     const tx = Math.cos(angle) * dist;
     const ty = Math.sin(angle) * dist + dist * 0.35; // slight gravity bias
     const size = 6 + Math.random() * 7;
@@ -100,6 +106,21 @@ function celebrateCard(cardEl) {
   setTimeout(() => layer.remove(), 1800);
 }
 
+// Completion firework from the just-finished card.
+function celebrateCard(cardEl) {
+  if (reduceMotion()) return;
+  const rect = cardEl.getBoundingClientRect();
+  spawnBurst(rect.left + rect.width / 2, rect.top + rect.height * 0.42);
+}
+
+// The reveal landing: a wider burst erupts from the settled name as the
+// spotlight blooms, so the pick feels like an entrance, not just a label.
+function celebrateReveal() {
+  if (reduceMotion()) return;
+  const rect = $("shuffleName").getBoundingClientRect();
+  spawnBurst(rect.left + rect.width / 2, rect.top + rect.height / 2, { count: 34, scale: 1.3 });
+}
+
 // Leaving the picking view: tear down any in-flight reveal so re-picking the
 // same person later (e.g. after Cancel) still triggers a fresh shuffle.
 function resetReveal() {
@@ -112,6 +133,20 @@ function resetReveal() {
 
 function render(s) {
   const prev = state;
+  // Cinematic handoff: when a topic is assigned (picking -> focus), morph the
+  // big settled name into the focus-view hero via the View Transitions API, so
+  // the spotlight visibly "follows" the speaker. Falls back to a plain switch
+  // where the API is missing or motion is reduced.
+  const morph =
+    nextView(prev) === "picking" &&
+    nextView(s) === "focus" &&
+    typeof document.startViewTransition === "function" &&
+    !reduceMotion();
+  if (morph) document.startViewTransition(() => applyRender(s, prev));
+  else applyRender(s, prev);
+}
+
+function applyRender(s, prev) {
   state = s;
 
   // A single topic flipping to done (host hit "Done") gets a celebration.
@@ -137,6 +172,14 @@ const RENDERERS = { board: renderBoard, picking: renderPicking, focus: renderFoc
 
 // ---- topic localStorage sync + one-time re-seed ------------------
 function syncTopicStorage(s) {
+  // Sample topics live only on the server. Never mirror them into the host's
+  // saved set, and don't re-seed from storage on top of a running demo —
+  // marking this load "seeded" keeps the post-exit clean slate clean too.
+  if (s.demo) {
+    seededThisLoad = true;
+    return;
+  }
+
   const serverTopics = s.topics.map((t) => ({ headline: t.headline, details: t.details || "" }));
 
   if (!seededThisLoad) {
@@ -227,6 +270,13 @@ function celebrateNewlyDone(host) {
 
 function renderBoard(s) {
   $("since").textContent = fmtTime(s.startedAt);
+
+  // First-run welcome vs. running demo vs. normal board. The welcome only
+  // shows on a cold start; the demo banner shows whenever sample data is live.
+  const welcome = showWelcome(s, onboarded);
+  $("board").classList.toggle("first-run", welcome);
+  $("welcome").hidden = !welcome;
+  $("demoBar").hidden = !s.demo;
 
   const present = s.participants.filter((p) => p.present);
   const answered = present.filter((p) => p.answered).length;
@@ -454,12 +504,12 @@ function startReveal(s, sel) {
   shuffleTimeout = setTimeout(() => {
     shuffleTimeout = null;
     clearShuffle();
-    settleReveal(sel);
+    settleReveal(sel, true);
     revealActive = false;
   }, 1000);
 }
 
-function settleReveal(sel) {
+function settleReveal(sel, burst = false) {
   clearShuffle();
   const nameEl = $("shuffleName");
   const label = $("shuffleLabel");
@@ -482,6 +532,7 @@ function settleReveal(sel) {
   banner.classList.add("show");
   choicesBox.classList.add("show");
   $("stage").classList.add("lit"); // bloom the spotlight on the settled name
+  if (burst && sel) celebrateReveal();
 }
 
 // ============================== FOCUS ==============================
@@ -490,6 +541,7 @@ function renderFocus(s) {
   if (!t) return; // snapshot will correct itself
   const who = t.assignee ? t.assignee.name : "";
   $("focusName").textContent = who;
+  $("focusInitials").textContent = who ? initials(who) : "";
   $("focusHeadline").textContent = t.headline;
   const dt = $("focusDetails");
   if (t.details) {
@@ -524,6 +576,28 @@ $("clearTopicsBtn").addEventListener("click", () => {
   clearStoredTopics();
   post("/api/topics", { topics: [], replace: true });
 });
+
+// ---- First-run welcome + demo mode -------------------------------
+// Mark the welcome seen so it never returns; remembered across visits.
+function markOnboarded() {
+  onboarded = true;
+  saveOnboarded();
+}
+// "Try a quick demo": the server seeds the sample meeting and the snapshot it
+// broadcasts re-renders us into demo mode.
+$("demoStartBtn").addEventListener("click", () => {
+  markOnboarded();
+  post("/api/demo/start");
+});
+// "Set up my own board": no server change, so re-render the cached snapshot to
+// drop the welcome and reveal the normal (empty) board.
+$("demoSkipBtn").addEventListener("click", () => {
+  markOnboarded();
+  renderBoard(state);
+});
+// "Exit demo": wipe the sample meeting back to a clean slate. Only sample data
+// is at stake, so no confirm — keep it one click.
+$("demoExitBtn").addEventListener("click", () => post("/api/demo/stop"));
 
 // ---- Add-topic tabs ----------------------------------------------
 function showTab(which) {

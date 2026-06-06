@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from board import State
+from board import DEMO_PARTICIPANTS, DEMO_TOPICS, State
 
 
 def _names(snapshot):
@@ -605,6 +605,72 @@ class TestRemoveParticipant:
         assert state.snapshot()["topics"][0]["status"] == "done"
 
 
+class TestDemo:
+    def test_start_demo_sets_flag_and_seeds(self, state):
+        state.start_demo()
+        snap = state.snapshot()
+        assert snap["demo"] is True
+        assert len(snap["participants"]) == len(DEMO_PARTICIPANTS)
+        assert len(snap["topics"]) == len(DEMO_TOPICS)
+
+    def test_start_demo_has_one_host_pinned_first(self, state):
+        state.start_demo()
+        snap = state.snapshot()
+        hosts = [p for p in snap["participants"] if p["is_host"]]
+        assert len(hosts) == 1
+        assert snap["participants"][0]["is_host"] is True
+
+    def test_start_demo_leaves_a_rollable_pool(self, state):
+        state.start_demo()
+        # Every roll lands on a present, unanswered, non-host sample speaker.
+        random.seed(0)
+        for _ in range(30):
+            pid = state.pick_random()
+            assert pid is not None
+            p = state.participants[pid]
+            assert p["is_host"] is False
+            assert p["present"] is True
+            assert p["answered"] is False
+            state.cancel_pick()
+
+    def test_start_demo_replaces_existing_state(self, state):
+        state.add_manual("Real Person")
+        state.add_topic("Real topic")
+        state.start_demo()
+        names = _names(state.snapshot())
+        assert "Real Person" not in names
+        headlines = [t["headline"] for t in state.snapshot()["topics"]]
+        assert "Real topic" not in headlines
+
+    def test_stop_demo_clears_everything(self, state):
+        state.start_demo()
+        # Run a little of the flow so there's round state to clear.
+        pid = state.pick_random()
+        tid = state.snapshot()["topics"][0]["id"]
+        state.assign(tid)
+        state.stop_demo()
+        snap = state.snapshot()
+        assert snap["demo"] is False
+        assert snap["participants"] == []
+        assert snap["topics"] == []
+        assert snap["selected"] is None
+        assert snap["activeTopicId"] is None
+        assert pid is not None  # sanity: a pick really happened before the stop
+
+    def test_sync_participants_ignored_during_demo(self, state):
+        state.start_demo()
+        before = _names(state.snapshot())
+        # A live Zoom read must not touch the demo roster.
+        assert state.sync_participants([{"name": "Intruder", "is_host": True}]) is False
+        assert _names(state.snapshot()) == before
+
+    def test_sync_resumes_after_stop_demo(self, state):
+        state.start_demo()
+        state.stop_demo()
+        assert state.sync_participants([{"name": "Alice", "is_host": False}]) is True
+        assert _names(state.snapshot()) == ["Alice"]
+
+
 class TestSnapshot:
     def test_has_expected_keys(self, state):
         snap = state.snapshot()
@@ -614,6 +680,7 @@ class TestSnapshot:
             "topics",
             "selected",
             "activeTopicId",
+            "demo",
         }
 
     def test_assignee_resolves_to_id_name_or_null(self, state):

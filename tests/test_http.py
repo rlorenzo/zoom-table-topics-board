@@ -321,6 +321,27 @@ class TestReset:
         assert snap["activeTopicId"] is None
 
 
+class TestDemo:
+    def test_start_seeds_and_sets_flag(self, server):
+        code, body = _post(server + "/api/demo/start")
+        assert code == 200
+        assert body == {"ok": True}
+        snap = STATE.snapshot()
+        assert snap["demo"] is True
+        assert len(snap["participants"]) > 0
+        assert len(snap["topics"]) > 0
+
+    def test_stop_returns_clean_slate(self, server):
+        _post(server + "/api/demo/start")
+        code, body = _post(server + "/api/demo/stop")
+        assert code == 200
+        assert body == {"ok": True}
+        snap = STATE.snapshot()
+        assert snap["demo"] is False
+        assert snap["participants"] == []
+        assert snap["topics"] == []
+
+
 class TestParticipantRoutes:
     def test_set_host_promotes_to_first(self, server):
         _add_participant(server, "Alice")

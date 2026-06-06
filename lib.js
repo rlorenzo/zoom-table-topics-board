@@ -32,6 +32,21 @@ export function parsePaste(text) {
     .filter((t) => t.headline);
 }
 
+// ---- speaker initials (focus-view avatar) ------------------------
+// Up to two letters from a display name: first letters of the first and last
+// word ("Diego Santos" -> "DS", "Maya" -> "M"). Falls back to the first
+// alphanumeric character, then to a dot so the avatar is never blank.
+export function initials(name) {
+  const words = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return "·";
+  const pick = words.length === 1 ? [words[0]] : [words[0], words[words.length - 1]];
+  const letters = pick.map((w) => [...w].find((c) => /[\p{L}\p{N}]/u.test(c)) || "").join("");
+  return (letters || [...words[0]].find((c) => /[\p{L}\p{N}]/u.test(c)) || "·").toUpperCase();
+}
+
 // ---- pick eligibility --------------------------------------------
 // The random roll's candidate names: present, not yet answered, and never the
 // host. Mirrors the server-side pool.
@@ -74,6 +89,34 @@ export function clearStoredTopics() {
   } catch {
     /* ignore */
   }
+}
+
+// ---- localStorage: the first-run flag ----------------------------
+// Set once the host has either tried the demo or chosen to set up their own
+// board, so the welcome screen never nags on later visits.
+const ONBOARDED_KEY = "tabletopics.onboarded.v1";
+
+export function loadOnboarded() {
+  try {
+    return localStorage.getItem(ONBOARDED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveOnboarded() {
+  try {
+    localStorage.setItem(ONBOARDED_KEY, "1");
+  } catch {
+    /* private mode / quota — non-fatal */
+  }
+}
+
+// Whether to show the first-run welcome: only on a genuinely cold start (no
+// topics and no one in the room), when the host hasn't onboarded yet and a
+// demo isn't already running.
+export function showWelcome(s, onboarded) {
+  return !onboarded && !s.demo && s.topics.length === 0 && s.participants.length === 0;
 }
 
 // ---- view / board decision logic ---------------------------------

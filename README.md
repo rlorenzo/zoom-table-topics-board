@@ -9,11 +9,21 @@ what they have been asked.
 One process, one command. No Node, no Zoom account, no credentials, nothing
 saved on a server.
 
+<!-- DEMO VIDEO  >  For an inline, play-in-place clip on GitHub: open this README
+     in the github.com editor and drag the file docs/demo.webm onto the marked
+     line below. GitHub uploads it to its CDN and replaces that line with a
+     user-attachments URL that embeds a player. Regenerate the clip anytime with
+     `npm run record:demo`. Until you embed it, the poster and the watch link
+     below work as-is. -->
 <p align="center">
-  <img src="docs/reveal.png" alt="A spotlight finds the chosen speaker" width="860">
+  <img src="docs/reveal.png" alt="The Table Topics spotlight reveal" width="860">
 </p>
-<p align="center"><em>Hit "Pick next participant" and the room rolls to a name
-under a warm spotlight.</em></p>
+<p align="center">
+  <!-- drag docs/demo.webm onto the next line in the github.com editor to embed the player -->
+  <a href="docs/demo.webm"><strong>&#9654; Watch the 14-second demo</strong></a>
+</p>
+<p align="center"><em>Load the sample meeting, roll a name under the spotlight,
+hand them a prompt, and put it up for the room.</em></p>
 
 <table>
   <tr>
@@ -125,6 +135,22 @@ uv run pytest          # tests
 uv run ruff check .    # lint
 uv run mypy            # type-check (strict)
 uv run pre-commit run --all-files
+```
+
+Front-end checks and the demo recorder use Node:
+
+```bash
+npm install
+npm test                          # vitest unit tests
+npm run check                     # lint + html-validate + coverage + dead code
+npm run record:demo               # rewrites docs/demo.webm from a scripted run
+```
+
+The recorder also needs Chromium and ffmpeg available once:
+
+```bash
+npx playwright install chromium   # records the flow
+brew install ffmpeg               # transcodes the capture to VP9 (or apt/choco)
 ```
 
 ## Credits

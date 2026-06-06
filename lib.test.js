@@ -6,12 +6,16 @@ import {
   eligibleNames,
   escapeHtml,
   fmtTime,
+  initials,
+  loadOnboarded,
   loadStoredTopics,
   newlyDoneId,
   nextView,
   parsePaste,
   pickHint,
+  saveOnboarded,
   saveStoredTopics,
+  showWelcome,
   topicAux,
 } from "./lib.js";
 
@@ -114,6 +118,62 @@ describe("topic localStorage", () => {
     saveStoredTopics([{ headline: "A", details: "" }]);
     clearStoredTopics();
     expect(loadStoredTopics()).toEqual([]);
+  });
+});
+
+describe("onboarded flag", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it("is false until set", () => {
+    expect(loadOnboarded()).toBe(false);
+  });
+
+  it("reads true after saveOnboarded", () => {
+    saveOnboarded();
+    expect(loadOnboarded()).toBe(true);
+  });
+});
+
+describe("showWelcome", () => {
+  const cold = { demo: false, topics: [], participants: [] };
+
+  it("shows on a cold start when not onboarded", () => {
+    expect(showWelcome(cold, false)).toBe(true);
+  });
+  it("hides once onboarded", () => {
+    expect(showWelcome(cold, true)).toBe(false);
+  });
+  it("hides while a demo is running", () => {
+    expect(showWelcome({ ...cold, demo: true }, false)).toBe(false);
+  });
+  it("hides when topics already exist", () => {
+    expect(showWelcome({ ...cold, topics: [{ id: "t1" }] }, false)).toBe(false);
+  });
+  it("hides when someone is already in the room", () => {
+    expect(showWelcome({ ...cold, participants: [{ id: "p1" }] }, false)).toBe(false);
+  });
+});
+
+describe("initials", () => {
+  it("takes the first and last word initials", () => {
+    expect(initials("Diego Santos")).toBe("DS");
+  });
+  it("uses one letter for a single name", () => {
+    expect(initials("Maya")).toBe("M");
+  });
+  it("ignores middle words", () => {
+    expect(initials("Ana Maria Lopez")).toBe("AL");
+  });
+  it("uppercases", () => {
+    expect(initials("priya patel")).toBe("PP");
+  });
+  it("skips leading punctuation/emoji to the first real character", () => {
+    expect(initials("🎤 Sam")).toBe("S");
+  });
+  it("falls back to a dot for an empty name", () => {
+    expect(initials("   ")).toBe("·");
+    expect(initials("")).toBe("·");
   });
 });
 
