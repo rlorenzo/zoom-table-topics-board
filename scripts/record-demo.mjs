@@ -63,21 +63,33 @@ async function recordWebm(dir) {
     reducedMotion: "no-preference",
     recordVideo: { dir, size: SIZE },
   });
-  // Skip the first-run welcome: mark this browser onboarded before any app
-  // script runs, so the clip opens straight on the board with topics listed.
   await context.addInitScript(() => {
+    // Skip the first-run welcome: mark this browser onboarded before any app
+    // script runs, so the clip opens straight on the board with topics listed.
     try {
       localStorage.setItem("tabletopics.onboarded.v1", "1");
     } catch {
       /* private mode */
     }
+    // Hide the demo banner in the recording only; the live app still shows it.
+    // The init script can run before <html> exists, so fall back to DOM ready.
+    const hideDemoBar = () => {
+      const style = document.createElement("style");
+      style.textContent = "#demoBar{display:none !important}";
+      (document.head || document.documentElement).appendChild(style);
+    };
+    if (document.head || document.documentElement) {
+      hideDemoBar();
+    } else {
+      document.addEventListener("DOMContentLoaded", hideDemoBar, { once: true });
+    }
   });
   const page = await context.newPage();
 
   // The demo meeting is seeded server-side before recording, so the first frame
-  // is the board with sample topics and the roster.
+  // is the board with sample topics and the roster (demo banner hidden above).
   await page.goto(BASE);
-  await page.waitForSelector("#demoBar:not([hidden])");
+  await page.waitForSelector("#topicsHost .card");
   await wait(2000);
 
   // 1. Roll a participant and let the spotlight reveal land.
