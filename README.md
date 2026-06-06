@@ -9,18 +9,11 @@ what they have been asked.
 One process, one command. No Node, no Zoom account, no credentials, nothing
 saved on a server.
 
-<!-- DEMO VIDEO  >  For an inline, play-in-place clip on GitHub: open this README
-     in the github.com editor and drag the file docs/demo.webm onto the marked
-     line below. GitHub uploads it to its CDN and replaces that line with a
-     user-attachments URL that embeds a player. Regenerate the clip anytime with
-     `npm run record:demo`. Until you embed it, the poster and the watch link
-     below work as-is. -->
 <p align="center">
   <img src="docs/reveal.png" alt="The Table Topics spotlight reveal" width="860">
 </p>
 <p align="center">
-  <!-- drag docs/demo.webm onto the next line in the github.com editor to embed the player -->
-  <a href="docs/demo.webm"><strong>&#9654; Watch the 14-second demo</strong></a>
+     [demo.webm](https://github.com/user-attachments/assets/ff7c856f-1bef-4aea-9868-7e4fb2b1ce40)
 </p>
 <p align="center"><em>Load the sample meeting, roll a name under the spotlight,
 hand them a prompt, and put it up for the room.</em></p>
