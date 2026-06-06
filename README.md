@@ -10,7 +10,7 @@ One process, one command. No Node, no Zoom account, no credentials, nothing
 saved on a server.
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/ff7c856f-1bef-4aea-9868-7e4fb2b1ce40" poster="https://raw.githubusercontent.com/rlorenzo/zoom-table-topics-board/main/docs/reveal.png" controls muted playsinline width="860"></video>
+  <video src="https://github.com/user-attachments/assets/ff7c856f-1bef-4aea-9868-7e4fb2b1ce40" poster="https://raw.githubusercontent.com/rlorenzo/zoom-table-topics-board/main/docs/reveal.png" autoplay loop muted playsinline controls width="860"></video>
 </p>
 <p align="center"><em>Load the sample meeting, roll a name under the spotlight,
 hand them a prompt, and put it up for the room.</em></p>
