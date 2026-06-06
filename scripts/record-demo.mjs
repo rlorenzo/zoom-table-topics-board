@@ -133,7 +133,11 @@ async function main() {
   try {
     await waitForServer(`${BASE}/`);
     // Seed the sample meeting before recording so the first frame shows topics.
-    await fetch(`${BASE}/api/demo/start`, { method: "POST" });
+    // Fail fast on a non-2xx here rather than later at the #demoBar wait.
+    const seed = await fetch(`${BASE}/api/demo/start`, { method: "POST" });
+    if (!seed.ok) {
+      throw new Error(`failed to start demo: HTTP ${seed.status}`);
+    }
     console.log("recording demo flow...");
     const webm = await recordWebm(tmp);
     console.log("transcoding to VP9...");
