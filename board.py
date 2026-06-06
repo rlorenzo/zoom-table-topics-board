@@ -680,9 +680,28 @@ class State:
             self._upsert(self._id("m", name + str(time.time())), name)
         self.broadcast()
 
+    def _upsert_seen(
+        self, people: list[Person], seen: set[str]
+    ) -> tuple[str | None, bool]:
+        """Upsert each named person, recording their id in `seen`. Returns the
+        detected host pid (if any) and whether anything changed. The caller
+        (sync_participants) owns the lock."""
+        host_pid: str | None = None
+        changed = False
+        for entry in people:
+            nm = str(entry.get("name") or "").strip()
+            if not nm:
+                continue
+            pid = self._id("a", nm)
+            seen.add(pid)
+            if entry.get("is_host"):
+                host_pid = pid
+            if self._upsert(pid, nm):
+                changed = True
+        return host_pid, changed
+
     def sync_participants(self, people: list[Person]) -> bool:
         """`people` is a list of {"name": str, "is_host": bool}."""
-        changed = False
         now = time.time() * 1000
         with self.lock:
             # While the sample meeting is loaded, the demo owns the roster.
@@ -691,17 +710,7 @@ class State:
             if self.demo:
                 return False
             seen: set[str] = set()
-            host_pid: str | None = None
-            for entry in people:
-                nm = str(entry.get("name") or "").strip()
-                if not nm:
-                    continue
-                pid = self._id("a", nm)
-                seen.add(pid)
-                if entry.get("is_host"):
-                    host_pid = pid
-                if self._upsert(pid, nm):
-                    changed = True
+            host_pid, changed = self._upsert_seen(people, seen)
             if host_pid is not None and self._settle_host(host_pid):
                 changed = True
             if self._mark_missing_as_left(seen, now):
