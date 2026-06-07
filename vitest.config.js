@@ -9,7 +9,7 @@ export default defineConfig({
       provider: "v8",
       // Only the testable pure module is gated. app.js is DOM/event wiring,
       // exercised by the app itself, not by unit tests.
-      include: ["lib.js"],
+      include: ["lib.js", "engine.js"],
       reporter: ["text", "text-summary"],
       // Floor, not a target (lib.js is fully covered today). Guards regressions.
       thresholds: { statements: 90, branches: 85, functions: 90, lines: 90 },

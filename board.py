@@ -99,6 +99,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 INDEX_HTML = os.path.join(HERE, "index.html")
 APP_JS = os.path.join(HERE, "app.js")
 LIB_JS = os.path.join(HERE, "lib.js")
+ENGINE_JS = os.path.join(HERE, "engine.js")
 STYLES_CSS = os.path.join(HERE, "styles.css")
 
 # Static web assets served next to index.html (extracted from the old
@@ -107,6 +108,7 @@ STYLES_CSS = os.path.join(HERE, "styles.css")
 STATIC_FILES: dict[str, tuple[str, str]] = {
     "/app.js": (APP_JS, "text/javascript; charset=utf-8"),
     "/lib.js": (LIB_JS, "text/javascript; charset=utf-8"),
+    "/engine.js": (ENGINE_JS, "text/javascript; charset=utf-8"),
     "/styles.css": (STYLES_CSS, "text/css; charset=utf-8"),
 }
 

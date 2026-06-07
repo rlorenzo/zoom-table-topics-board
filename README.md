@@ -1,10 +1,10 @@
 # Table Topics
 
-Run **Table Topics** in a video meeting from one local command. The board reads
-your Zoom Participants panel automatically, rolls a random person who has not
-gone yet, and lets you hand them a prompt. The prompt then fills the screen for
-the whole room. Screen-share the browser tab and everyone sees who is up and
-what they have been asked.
+Run **Table Topics** in a video meeting, in your browser or from one local
+command. The board rolls a random person who has not gone yet and lets you hand
+them a prompt, which then fills the screen for the whole room. Run it locally
+and it also reads your Zoom Participants panel automatically. Screen-share the
+browser tab and everyone sees who is up and what they have been asked.
 
 One process, one command. No Node, no Zoom account, no credentials, nothing
 saved on a server.
@@ -27,6 +27,23 @@ hand them a prompt, and put it up for the room.</em></p>
     </td>
   </tr>
 </table>
+
+## Use it in your browser (no install)
+
+A hosted version runs at
+**<https://rlorenzo.github.io/zoom-table-topics-board/>**. It is the same board,
+running entirely in your browser: no install, no Python, and nothing sent to a
+server. Open it, screen-share the tab, and you are ready.
+
+In the hosted version you add participants by hand (manual mode), and your topics
+still save in your browser (localStorage) exactly like the local app, so a reload
+or your next meeting pre-fills them.
+
+The one thing the hosted version cannot do is auto-read Zoom's Participants
+panel, because a browser tab cannot see another app's window. If you want the
+roster filled for you automatically, run it locally (see [Quick start](#quick-start))
+and the board reads Zoom for you. In short: hosted is a zero-setup manual board
+for anyone, and local is that same board plus Zoom auto-read.
 
 ## Quick start
 
