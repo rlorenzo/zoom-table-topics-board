@@ -1,0 +1,50 @@
+name: Deploy to GitHub Pages
+
+# Publishes the static browser app to GitHub Pages. In the hosted build the app
+# runs in manual mode (no Zoom auto-read), so the only files the live page loads
+# are the front-end statics below plus Google Fonts from their CDN.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least-privilege token plus the OIDC id-token the deploy step needs to publish.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time. Don't cancel an in-flight publish; let it finish.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Configure Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b  # v5.0.0
+
+      # Copy only the files the live page loads into a clean _site/. Everything
+      # else (board.py, tests/, *.md, dotfiles, node tooling) stays out so the
+      # site is served verbatim. .nojekyll keeps Pages from touching the files.
+      - name: Assemble site
+        run: |
+          mkdir _site
+          cp index.html styles.css app.js lib.js engine.js _site/
+          touch _site/.nojekyll
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b  # v4.0.0
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e  # v4.0.5

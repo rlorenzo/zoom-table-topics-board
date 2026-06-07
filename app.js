@@ -1,3 +1,4 @@
+import { createEngine } from "./engine.js";
 import {
   cardClass,
   chipClass,
@@ -32,12 +33,22 @@ const $ = (id) => document.getElementById(id);
 const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // ---- API ---------------------------------------------------------
-async function post(url, body) {
-  return fetch(url, {
-    method: "POST",
-    headers: body ? { "Content-Type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
+// One app.js, two transports. With a backend present (uv run board.py) we POST
+// to /api/* and stream snapshots over SSE, preserving Zoom auto-read. Served
+// statically (GitHub Pages) we drive a local engine.js with no network at all.
+// The transport is chosen once at startup; every post() below delegates to it.
+let activeTransport = null;
+// The transport is chosen asynchronously at startup (we probe for a backend).
+// Until it resolves, buffer posts on this promise instead of dropping them, so
+// an early click during the probe still reaches the engine/server.
+let markTransportReady;
+const transportReady = new Promise((resolve) => {
+  markTransportReady = resolve;
+});
+function post(url, body) {
+  return activeTransport
+    ? activeTransport.post(url, body)
+    : transportReady.then((t) => t.post(url, body));
 }
 
 // ---- state cache -------------------------------------------------
@@ -778,15 +789,102 @@ function setLive(text, stale) {
   });
 }
 
-const es = new EventSource("/events");
-es.onmessage = (e) => {
-  let snap;
+// Server transport: today's exact behavior, just moved behind the interface.
+// post() fetches /api/*; subscribe() streams snapshots from the /events SSE.
+function serverTransport() {
+  return {
+    post(url, body) {
+      return fetch(url, {
+        method: "POST",
+        headers: body ? { "Content-Type": "application/json" } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    },
+    subscribe(onSnapshot) {
+      const es = new EventSource("/events");
+      es.onmessage = (e) => {
+        let snap;
+        try {
+          snap = JSON.parse(e.data);
+        } catch {
+          return;
+        }
+        onSnapshot(snap);
+      };
+      es.onerror = () => setLive("reconnecting", true);
+      es.onopen = () => setLive("live", false);
+    },
+  };
+}
+
+// Local transport: no backend. post() routes the /api/* URL to an engine.js
+// method (the same calls board.py makes server-side); subscribe() wires the
+// engine's snapshot stream straight into render(). There's no connection to
+// drop here, so the status reads "live" once and never goes "reconnecting".
+const LOCAL_ROUTES = [
+  [/^\/api\/participant$/, (e, _m, b) => e.addParticipant(b.name)],
+  [/^\/api\/participant\/([^/]+)\/remove$/, (e, m) => e.removeParticipant(m[1])],
+  [/^\/api\/topic$/, (e, _m, b) => e.addTopic(b.headline, b.details)],
+  [/^\/api\/topics$/, (e, _m, b) => e.addTopics(b.topics, b.replace)],
+  [/^\/api\/topic\/([^/]+)\/edit$/, (e, m, b) => e.editTopic(m[1], b.headline, b.details)],
+  [/^\/api\/topic\/([^/]+)\/remove$/, (e, m) => e.removeTopic(m[1])],
+  [/^\/api\/topic\/([^/]+)\/done$/, (e, m) => e.markDone(m[1])],
+  [/^\/api\/topic\/([^/]+)\/reopen$/, (e, m) => e.reopenTopic(m[1])],
+  [/^\/api\/topic\/([^/]+)\/assign$/, (e, m) => e.assign(m[1])],
+  [/^\/api\/pick$/, (e, _m, b) => e.pick(b.exclude)],
+  [/^\/api\/select$/, (e, _m, b) => e.select(b.pid)],
+  [/^\/api\/pick\/cancel$/, (e) => e.cancelPick()],
+  [/^\/api\/reset$/, (e) => e.reset()],
+  [/^\/api\/demo\/start$/, (e) => e.startDemo()],
+  [/^\/api\/demo\/stop$/, (e) => e.stopDemo()],
+];
+
+function localTransport(engine) {
+  return {
+    post(url, body) {
+      // Match on the path only; app.js passes bare paths, but be robust to a
+      // full URL too. An unknown route is a safe no-op (mirrors board.py's 404).
+      const path = new URL(url, "http://x").pathname;
+      const b = body || {};
+      for (const [re, run] of LOCAL_ROUTES) {
+        const m = re.exec(path);
+        if (m) {
+          run(engine, m, b);
+          break;
+        }
+      }
+      return Promise.resolve();
+    },
+    subscribe(onSnapshot) {
+      engine.subscribe(onSnapshot);
+      setLive("live", false);
+    },
+  };
+}
+
+// Probe for a backend: GET events and confirm it's an SSE stream. Any failure
+// (no server, wrong content-type, timeout) means we're a static page, so fall
+// back to standalone. The path is relative so it works from any GitHub Pages
+// subpath. We open and immediately cancel the stream we used to probe.
+async function hasServer() {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 1500);
   try {
-    snap = JSON.parse(e.data);
+    const res = await fetch("events", { signal: ctrl.signal });
+    const ct = res.headers.get("content-type") || "";
+    res.body?.cancel?.();
+    return res.ok && ct.includes("text/event-stream");
   } catch {
-    return;
+    return false;
+  } finally {
+    clearTimeout(t);
   }
-  render(snap);
-};
-es.onerror = () => setLive("reconnecting", true);
-es.onopen = () => setLive("live", false);
+}
+
+// app.js is a module, so top-level await is allowed. The event handlers above
+// registered synchronously already; any post() they fire before the probe
+// resolves is buffered on transportReady and flushed once we mark it ready.
+const engine = createEngine();
+activeTransport = (await hasServer()) ? serverTransport() : localTransport(engine);
+markTransportReady(activeTransport);
+activeTransport.subscribe(render);
