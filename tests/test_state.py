@@ -113,8 +113,9 @@ class TestSyncParticipants:
                 {"name": "Bob", "is_host": False},
             ]
         )
-        # An empty read (Zoom up, nobody detected) clears the AX roster — the
-        # poller debounces this, but the State behavior must be correct.
+        # sync_participants([]) clears the AX roster (everyone marked left). The
+        # poller no longer calls this on an empty read, but the State contract
+        # must stay correct for the genuine "everyone gone" case.
         state.sync_participants([])
         assert _by_name(state, "Alice")["present"] is False
         assert _by_name(state, "Bob")["present"] is False
@@ -303,22 +304,29 @@ class TestPickRandom:
             ]
         )
 
-    def test_only_eligible_get_chosen_and_never_host(self, state):
+    def test_eligible_get_chosen_including_the_host(self, state):
         self._seed_pool(state)
-        host_pid = _pid_of(state, "Host")
         chosen = {state.pick_random() for _ in range(50)}
-        assert host_pid not in chosen
-        # Every chosen id resolves to a non-host present participant.
+        # Every chosen id resolves to a present, unanswered participant — the
+        # host included, since the host is now a full participant.
         for pid in chosen:
             p = state.participants[pid]
-            assert p["is_host"] is False
             assert p["present"] is True
             assert p["answered"] is False
 
+    def test_host_can_be_rolled(self, state):
+        self._seed_pool(state)
+        host_pid = _pid_of(state, "Host")
+        # Answer everyone except the host, leaving the host the only eligible pick.
+        for name in ("Alice", "Bob", "Carol"):
+            _by_name(state, name)["answered"] = True
+        for _ in range(20):
+            assert state.pick_random() == host_pid
+
     def test_answered_are_excluded(self, state):
         self._seed_pool(state)
-        # Mark everyone but Alice answered.
-        for n in ("Bob", "Carol"):
+        # Mark everyone but Alice answered (the host too, now that they're rolled).
+        for n in ("Host", "Bob", "Carol"):
             _by_name(state, n)["answered"] = True
         random.seed(0)
         for _ in range(20):
@@ -326,19 +334,16 @@ class TestPickRandom:
 
     def test_not_present_are_excluded(self, state):
         self._seed_pool(state)
-        # Only Alice stays in the panel; Bob and Carol leave.
-        state.sync_participants(
-            [
-                {"name": "Host", "is_host": True},
-                {"name": "Alice", "is_host": False},
-            ]
-        )
+        # Only Alice stays in the panel; the host, Bob, and Carol leave.
+        state.sync_participants([{"name": "Alice", "is_host": False}])
         random.seed(0)
         for _ in range(20):
             assert state.pick_random() == _pid_of(state, "Alice")
 
     def test_empty_pool_returns_none_and_clears_selection(self, state):
-        state.sync_participants([{"name": "Host", "is_host": True}])
+        # One participant, already answered, so nobody is eligible.
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+        _by_name(state, "Alice")["answered"] = True
         # Pre-seed a selection so we can confirm it gets cleared.
         state.selected_pid = "stale"
         assert state.pick_random() is None
@@ -352,12 +357,7 @@ class TestPickRandom:
 
     def test_exclude_pid_falls_back_when_pool_would_empty(self, state):
         # Only one eligible person; excluding them must still re-pick them.
-        state.sync_participants(
-            [
-                {"name": "Host", "is_host": True},
-                {"name": "Solo", "is_host": False},
-            ]
-        )
+        state.sync_participants([{"name": "Solo", "is_host": False}])
         solo = _pid_of(state, "Solo")
         assert state.pick_random(exclude_pid=solo) == solo
         assert state.selected_pid == solo
@@ -413,6 +413,52 @@ class TestCancelPick:
         assert state.selected_pid is not None
         state.cancel_pick()
         assert state.selected_pid is None
+
+
+class TestSetExcluded:
+    def test_added_participant_defaults_to_not_excluded(self, state):
+        state.add_manual("Alice")
+        assert _by_name(state, "Alice")["excluded"] is False
+
+    def test_toggles_the_flag_on_and_off(self, state):
+        state.add_manual("Alice")
+        pid = _pid_of(state, "Alice")
+        assert state.set_excluded(pid, True) is True
+        assert _by_name(state, "Alice")["excluded"] is True
+        assert state.set_excluded(pid, False) is True
+        assert _by_name(state, "Alice")["excluded"] is False
+
+    def test_unknown_pid_returns_false(self, state):
+        assert state.set_excluded("nope", True) is False
+
+    def test_excluded_people_are_not_rolled(self, state):
+        state.add_manual("Alice")
+        state.add_manual("Bob")
+        state.set_excluded(_pid_of(state, "Bob"), True)
+        alice = _pid_of(state, "Alice")
+        for _ in range(20):
+            assert state.pick_random() == alice
+
+    def test_excluded_person_cannot_be_selected(self, state):
+        state.add_manual("Alice")
+        pid = _pid_of(state, "Alice")
+        state.set_excluded(pid, True)
+        assert state.select_participant(pid) is False
+
+    def test_excluding_selected_person_drops_the_selection(self, state):
+        state.add_manual("Alice")
+        pid = _pid_of(state, "Alice")
+        state.select_participant(pid)
+        assert state.selected_pid == pid
+        state.set_excluded(pid, True)
+        assert state.selected_pid is None
+
+    def test_persists_across_reset(self, state):
+        state.add_manual("Alice")
+        pid = _pid_of(state, "Alice")
+        state.set_excluded(pid, True)
+        state.reset()
+        assert _by_name(state, "Alice")["excluded"] is True
 
 
 class TestAssign:
@@ -528,6 +574,24 @@ class TestReopenTopic:
     def test_reopen_unknown_returns_false(self, state):
         assert state.reopen_topic("nope") is False
 
+    def test_reopen_reselect_returns_to_topic_list(self, state):
+        state.add_manual("Alice")
+        pid = _pid_of(state, "Alice")
+        tid = state.add_topic("Topic")
+        state.select_participant(pid)
+        state.assign(tid)
+        assert state.reopen_topic(tid, reselect=True) is True
+        assert state.active_topic_id is None
+        assert state.selected_pid == pid
+
+    def test_reopen_without_reselect_leaves_selection_cleared(self, state):
+        state.add_manual("Alice")
+        tid = state.add_topic("Topic")
+        state.select_participant(_pid_of(state, "Alice"))
+        state.assign(tid)
+        assert state.reopen_topic(tid) is True
+        assert state.selected_pid is None
+
 
 class TestReset:
     def test_reset_keeps_topics_and_participants_but_clears_round(self, state):
@@ -622,13 +686,13 @@ class TestDemo:
 
     def test_start_demo_leaves_a_rollable_pool(self, state):
         state.start_demo()
-        # Every roll lands on a present, unanswered, non-host sample speaker.
+        # Every roll lands on a present, unanswered sample speaker (the host
+        # included — they're a full participant now).
         random.seed(0)
         for _ in range(30):
             pid = state.pick_random()
             assert pid is not None
             p = state.participants[pid]
-            assert p["is_host"] is False
             assert p["present"] is True
             assert p["answered"] is False
             state.cancel_pick()

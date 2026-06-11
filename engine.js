@@ -9,7 +9,8 @@
 // server one-for-one.
 
 // ---- demo seed data (verbatim from board.py) ---------------------
-// name, is_host. The host runs the board and is skipped by the random roll.
+// name, is_host. is_host only flags who runs the board (badge + first slot);
+// the host is still a full participant and is rolled like everyone.
 const DEMO_PARTICIPANTS = [
   ["Sam Rivera", true],
   ["Maya Chen", false],
@@ -146,6 +147,7 @@ export function createEngine() {
       present: true,
       answered: false,
       is_host: false,
+      excluded: false,
     });
     order.push(pid);
     notify();
@@ -236,13 +238,14 @@ export function createEngine() {
   }
 
   // --- selection & assignment -----------------------------------------
-  // Participants who can be rolled: present, not yet answered, not the host
-  // (the host runs the board), and not the just-excluded person.
+  // Participants who can be rolled: present, not yet answered, not opted out
+  // (excluded), and not the just-excluded person from a "pick someone else".
+  // The host is a full participant and is rolled like anyone else.
   function eligiblePool(excludePid) {
     const pool = [];
     for (const pid of order) {
       const p = participants.get(pid);
-      if (!p?.present || p.answered || p.is_host) continue;
+      if (!p?.present || p.answered || p.excluded) continue;
       if (pid === excludePid) continue;
       pool.push(pid);
     }
@@ -275,7 +278,7 @@ export function createEngine() {
   // the same one-turn rule the random roll uses.
   function select(pid) {
     const p = participants.get(pid);
-    if (!p?.present || p.answered) return false;
+    if (!p?.present || p.answered || p.excluded) return false;
     selectedPid = pid;
     notify();
     return true;
@@ -284,6 +287,21 @@ export function createEngine() {
   function cancelPick() {
     selectedPid = null;
     notify();
+  }
+
+  // Toggle whether a participant is skipped by the random roll: an opt-out for
+  // someone who doesn't want to be called, or a way to narrow the pool to people
+  // who haven't spoken. Excluded people are dropped from the roll and can't be
+  // manually selected either, until un-excluded. A pending selection on the
+  // now-excluded person is dropped so we don't strand on the picking view. The
+  // flag persists across reset() (a new round doesn't un-opt-out anyone).
+  function setExcluded(pid, val) {
+    const p = participants.get(pid);
+    if (!p) return false;
+    p.excluded = !!val;
+    if (p.excluded && selectedPid === pid) selectedPid = null;
+    notify();
+    return true;
   }
 
   // Give the currently selected person an open topic. Locks the topic
@@ -323,8 +341,10 @@ export function createEngine() {
   }
 
   // Undo an active/done topic back to open (the focus "Back" button and the
-  // board "reopen" affordance). The assignee returns to the pool.
-  function reopenTopic(tid) {
+  // board "reopen" affordance). The assignee returns to the pool. When
+  // `reselect` is set (the focus "Back" case), re-select that person so we land
+  // back on the picking view with the topic list, ready to pick a different one.
+  function reopenTopic(tid, reselect = false) {
     const t = topics.get(tid);
     if (!t) return false;
     const aid = t.assignee;
@@ -332,6 +352,7 @@ export function createEngine() {
     t.assignee = null;
     t.status = "open";
     if (activeTopicId === tid) activeTopicId = null;
+    if (reselect && aid && participants.get(aid)?.present) selectedPid = aid;
     notify();
     return true;
   }
@@ -379,6 +400,7 @@ export function createEngine() {
         present: true,
         answered: false,
         is_host: isHost,
+        excluded: false,
       });
       order.push(pid);
     });
@@ -408,6 +430,7 @@ export function createEngine() {
     pick,
     select,
     cancelPick,
+    setExcluded,
     reset,
     startDemo,
     stopDemo,

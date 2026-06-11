@@ -21,7 +21,11 @@ assets (HTML/CSS/JS).
     uv sync --dev
     npm install
     uv run pre-commit install
+    uv run pre-commit install --hook-type pre-push
     ```
+
+    The second line installs the pre-push hooks (`pip-audit`, `vitest`,
+    `fallow`); the first installs the commit-stage hooks. Both are needed.
 
 ## Workflow
 

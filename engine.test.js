@@ -62,6 +62,7 @@ describe("addParticipant", () => {
     expect(p.present).toBe(true);
     expect(p.answered).toBe(false);
     expect(p.is_host).toBe(false);
+    expect(p.excluded).toBe(false);
     expect(p.leftTime).toBeNull();
     expect(typeof p.joinTime).toBe("number");
   });
@@ -209,16 +210,21 @@ describe("pick", () => {
     }
   });
 
-  it("never chooses a host", () => {
+  it("can choose the host (the host is a full participant)", () => {
     // The only way to get a host-flagged participant is the demo seed.
     engine.startDemo();
-    const hostPid = engine.snapshot().participants.find((p) => p.is_host).id;
-    const chosen = new Set();
-    for (let i = 0; i < 50; i++) {
-      chosen.add(engine.pick());
-      engine.cancelPick();
+    const snap = engine.snapshot();
+    const hostPid = snap.participants.find((p) => p.is_host).id;
+    // Answer everyone except the host, so the host is the only one left — the
+    // roll must then land on them, proving the host is eligible.
+    for (const p of snap.participants) {
+      if (p.is_host) continue;
+      const tid = engine.addTopic(`T-${p.id}`);
+      engine.select(p.id);
+      engine.assign(tid);
+      engine.markDone(tid);
     }
-    expect(chosen.has(hostPid)).toBe(false);
+    expect(engine.pick()).toBe(hostPid);
   });
 
   it("answered people are excluded", () => {
@@ -230,6 +236,15 @@ describe("pick", () => {
       engine.assign(tid);
       engine.markDone(tid);
     }
+    for (let i = 0; i < 20; i++) {
+      expect(engine.pick()).toBe(pidOf(engine, "Alice"));
+    }
+  });
+
+  it("opted-out (excluded) people are excluded from the roll", () => {
+    seedPool();
+    engine.setExcluded(pidOf(engine, "Bob"), true);
+    engine.setExcluded(pidOf(engine, "Carol"), true);
     for (let i = 0; i < 20; i++) {
       expect(engine.pick()).toBe(pidOf(engine, "Alice"));
     }
@@ -301,7 +316,7 @@ describe("select", () => {
     expect(engine.snapshot().selected.id).toBe(pid);
   });
 
-  it("may select the host (the random roll skips them)", () => {
+  it("may select the host directly", () => {
     engine.startDemo();
     const hostPid = engine.snapshot().participants.find((p) => p.is_host).id;
     expect(engine.select(hostPid)).toBe(true);
@@ -316,6 +331,45 @@ describe("select", () => {
     const { pid, tid } = setupActiveTopic(engine);
     engine.markDone(tid);
     expect(engine.select(pid)).toBe(false);
+  });
+
+  it("an excluded person cannot be selected", () => {
+    engine.addParticipant("Alice");
+    const pid = pidOf(engine, "Alice");
+    engine.setExcluded(pid, true);
+    expect(engine.select(pid)).toBe(false);
+  });
+});
+
+describe("setExcluded", () => {
+  it("toggles the flag on and off", () => {
+    engine.addParticipant("Alice");
+    const pid = pidOf(engine, "Alice");
+    expect(engine.setExcluded(pid, true)).toBe(true);
+    expect(byName(engine, "Alice").excluded).toBe(true);
+    expect(engine.setExcluded(pid, false)).toBe(true);
+    expect(byName(engine, "Alice").excluded).toBe(false);
+  });
+
+  it("an unknown pid returns false", () => {
+    expect(engine.setExcluded("nope", true)).toBe(false);
+  });
+
+  it("excluding the selected person drops the pending selection", () => {
+    engine.addParticipant("Alice");
+    const pid = pidOf(engine, "Alice");
+    engine.select(pid);
+    expect(engine.snapshot().selected.id).toBe(pid);
+    engine.setExcluded(pid, true);
+    expect(engine.snapshot().selected).toBeNull();
+  });
+
+  it("persists across reset (a new round does not un-opt-out anyone)", () => {
+    engine.addParticipant("Alice");
+    const pid = pidOf(engine, "Alice");
+    engine.setExcluded(pid, true);
+    engine.reset();
+    expect(byName(engine, "Alice").excluded).toBe(true);
   });
 });
 
@@ -425,6 +479,20 @@ describe("reopenTopic", () => {
   it("an unknown id returns false", () => {
     expect(engine.reopenTopic("nope")).toBe(false);
   });
+
+  it("reselect re-selects the assignee so we land back on the topic list", () => {
+    const { pid, tid } = setupActiveTopic(engine);
+    expect(engine.reopenTopic(tid, true)).toBe(true);
+    const snap = engine.snapshot();
+    expect(snap.activeTopicId).toBeNull();
+    expect(snap.selected.id).toBe(pid);
+  });
+
+  it("without reselect the selection stays cleared (board reopen path)", () => {
+    const { tid } = setupActiveTopic(engine);
+    expect(engine.reopenTopic(tid)).toBe(true);
+    expect(engine.snapshot().selected).toBeNull();
+  });
 });
 
 describe("reset", () => {
@@ -516,7 +584,8 @@ describe("demo", () => {
       const pid = engine.pick();
       expect(pid).not.toBeNull();
       const p = engine.snapshot().participants.find((x) => x.id === pid);
-      expect(p.is_host).toBe(false);
+      // The host is a full participant now, so a pick may land on them; only
+      // present + unanswered is required.
       expect(p.present).toBe(true);
       expect(p.answered).toBe(false);
       engine.cancelPick();

@@ -48,14 +48,6 @@
     </div>
   </header>
 
-  <div class="stats" aria-label="Counts">
-    <div class="stat"><div class="n" id="s-togo">0</div><div class="l">Still to go</div></div>
-    <div class="stat"><div class="n" id="s-answered">0</div><div class="l">Answered</div></div>
-    <div class="stat"><div class="n" id="s-room">0</div><div class="l">In the room</div></div>
-    <div class="stat"><div class="n" id="s-tdone">0</div><div class="l">Topics done</div></div>
-    <div class="stat"><div class="n" id="s-ttotal">0</div><div class="l">Topics total</div></div>
-  </div>
-
   <main aria-live="polite">
     <section class="welcome" id="welcome" aria-labelledby="welcomeTitle" hidden>
       <div class="welcome-card">
@@ -87,6 +79,10 @@
         <span class="aux">Click a name to hand them a topic</span>
       </div>
       <div class="roster" id="roster"></div>
+      <p class="roster-legend" id="rosterLegend" hidden>
+        <svg class="ic" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="4.6" y="3.5" width="2.3" height="9" rx="1"/><rect x="9.1" y="3.5" width="2.3" height="9" rx="1"/></svg>
+        <span>Pause anyone to have them sit out of the random pick. Press play to bring them back.</span>
+      </p>
       <form class="roster-add" id="rosterAddForm" autocomplete="off">
         <input id="rosterAddName" placeholder="Add someone manually&hellip;" aria-label="Add participant by name" />
         <button class="btn ghost" type="submit">Add</button>
@@ -99,6 +95,14 @@
         <span id="addToggleLabel">Add or edit topics</span>
       </button>
       <div class="add-area" id="addArea" hidden>
+        <label class="conceal-row">
+          <input type="checkbox" id="concealTopics" />
+          <span class="conceal-copy">
+            <span class="conceal-title">Surprise mode</span>
+            <span class="conceal-sub">Hide topic text on the board until a topic is picked, then reveal it.</span>
+          </span>
+        </label>
+
         <div class="add-tabs" role="tablist" aria-label="How to add topics">
           <button class="add-tab on" id="tabSingle" role="tab" aria-selected="true" type="button">Add one</button>
           <button class="add-tab" id="tabPaste" role="tab" aria-selected="false" type="button">Paste many</button>

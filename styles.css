@@ -133,7 +133,7 @@ textarea {
 }
 
 .wrap {
-  max-width: 1040px;
+  max-width: 1240px;
   margin: 0 auto;
   padding: clamp(28px, 5vh, 56px) clamp(20px, 5vw, 48px);
 }
@@ -285,44 +285,12 @@ h1.app-title {
   text-align: right;
   min-height: 1.2em;
 }
-
-/* Stats — a calm scoreboard ------------------------------------- */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
-  margin: 26px 0 34px;
-}
-.stat {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: 15px 16px 13px;
-}
-/* "Still to go" is the count that drives the activity — give it weight. */
-.stat:first-child {
-  background: var(--primary-tint);
-  border-color: var(--primary-tint-2);
-}
-.stat:first-child .n {
-  color: var(--primary-ink);
-}
-.stat .n {
-  font-family: var(--font-display);
-  font-size: 1.9rem;
+/* The live "still to go" count rides on this hint line. Its number is the one
+   metric the host paces by, so give it ink weight against the muted words. */
+.cta-hint b {
   font-weight: 700;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  font-feature-settings: "tnum" 1;
   color: var(--ink);
-}
-.stat .l {
-  margin-top: 8px;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
+  font-feature-settings: "tnum" 1;
 }
 
 /* Section heads -------------------------------------------------- */
@@ -349,7 +317,7 @@ h1.app-title {
 .topics {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(244px, 1fr));
-  gap: 12px;
+  gap: 10px;
   margin-bottom: 14px;
 }
 
@@ -442,6 +410,39 @@ button.card.choose:focus-visible {
 .card.open .status-tag {
   color: var(--primary-ink);
   background: var(--primary-tint);
+}
+
+/* concealed — surprise mode hides an open topic's text until it's picked. The
+   card keeps its status pill but shows a muted "Hidden topic" placeholder over a
+   faint diagonal hatch, so the room can see a topic is queued without reading it. */
+.card.concealed {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--surface) 0,
+    var(--surface) 9px,
+    var(--bg) 9px,
+    var(--bg) 18px
+  );
+  border-style: dashed;
+  border-color: var(--line-2);
+}
+.card .hl.hl-hidden {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 600;
+  font-style: italic;
+}
+.card .hl.hl-hidden .ic {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: var(--faint);
+}
+/* In the picking grid a masked card invites a blind pick. */
+button.card.choose.concealed:hover {
+  border-style: solid;
 }
 
 /* active (rare on the board; the focus view normally takes over) */
@@ -600,16 +601,20 @@ button.card.choose:focus-visible {
   padding-top: 11px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 0.8125rem;
+  gap: 7px;
+  font-size: 0.9375rem;
   color: var(--ink-soft);
 }
+/* The speaker's name is the record of who took the topic; keep it large and
+   crisp (ink, not muted) so it stays readable even on a receded "done" card. */
 .card .assignee .who {
-  font-weight: 600;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--ink);
 }
 .card .assignee .ic {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   color: var(--muted);
   flex: none;
 }
@@ -763,6 +768,41 @@ button.card.choose:focus-visible {
   display: flex;
   gap: 4px;
   margin-bottom: 14px;
+}
+
+/* Surprise-mode switch at the top of the topic editor. */
+.conceal-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.conceal-row input {
+  width: auto;
+  flex: none;
+  margin: 2px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.conceal-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.conceal-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.conceal-sub {
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--muted);
 }
 .add-tab {
   background: none;
@@ -970,16 +1010,16 @@ textarea {
 .roster {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   background: var(--bg);
   border: 1px solid var(--line-2);
   border-radius: var(--r-pill);
-  padding: 5px 7px 5px 12px;
+  padding: 9px 10px 9px 16px;
   transition:
     border-color var(--t-fast),
     background var(--t-fast);
@@ -997,12 +1037,12 @@ textarea {
   padding: 0;
   cursor: pointer;
   font: inherit;
-  font-size: 0.875rem;
+  font-size: 1.0625rem;
   font-weight: 600;
   color: var(--ink);
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 9px;
   border-radius: var(--r-xs);
 }
 .chip.answered .pick-name {
@@ -1023,8 +1063,8 @@ textarea {
   outline-offset: 2px;
 }
 .chip .state-ic {
-  width: 13px;
-  height: 13px;
+  width: 16px;
+  height: 16px;
   flex: none;
 }
 .chip .state-ic.present {
@@ -1037,19 +1077,19 @@ textarea {
   color: var(--faint);
 }
 .chip .host-pill {
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: #fff;
   background: var(--true-maroon);
-  padding: 2px 6px;
+  padding: 3px 7px;
   border-radius: var(--r-pill);
 }
 .chip .x {
   background: none;
   border: 0;
-  padding: 3px;
+  padding: 4px;
   color: var(--faint);
   cursor: pointer;
   display: inline-flex;
@@ -1066,6 +1106,79 @@ textarea {
 .chip .x:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
+}
+
+/* Sit-out toggle — pause a person out of the random roll, play to bring them
+   back. Sits between the name and the remove button; mirrors the quiet .x
+   affordance. Neutral by design: benching someone is calm, never destructive. */
+.chip .skip {
+  background: none;
+  border: 0;
+  padding: 4px;
+  color: var(--faint);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 50%;
+  transition:
+    color var(--t-fast),
+    background var(--t-fast);
+}
+.chip .skip .ic {
+  width: 16px;
+  height: 16px;
+}
+.chip .skip:hover {
+  color: var(--ink-soft);
+  background: var(--surface-2);
+}
+.chip .skip:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+/* When pressed (person is sitting out), the play toggle reads as settled-on. */
+.chip .skip[aria-pressed="true"] {
+  color: var(--muted);
+}
+
+/* Sitting-out chip: the calm sibling of the "answered" state. Same quiet gray
+   recede, no strikethrough, no danger hue — parked, not removed. */
+.chip.excluded {
+  background: var(--surface);
+  border-color: var(--line);
+}
+.chip.excluded .pick-name {
+  color: var(--muted);
+  font-weight: 500;
+}
+.chip .state-ic.sitting {
+  color: var(--muted);
+}
+.chip .chip-tag {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--surface-2);
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+
+.roster-legend {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+.roster-legend .ic {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--muted);
 }
 
 .roster-add {
@@ -1169,7 +1282,6 @@ footer .note {
 /* The cold-start screen: explain the app in a sentence, then offer the demo
      or a clean board. When it's up, the rest of the board is hidden so the
      choice is the only thing on screen. */
-.wrap.first-run .stats,
 .wrap.first-run #pickGroup,
 .wrap.first-run footer,
 .wrap.first-run .sponsor-bar {
@@ -2019,9 +2131,6 @@ footer .note {
 
 /* Narrow screens ------------------------------------------------- */
 @media (max-width: 760px) {
-  .stats {
-    grid-template-columns: repeat(3, 1fr);
-  }
   .titlebar {
     flex-direction: column;
     align-items: stretch;
@@ -2038,9 +2147,6 @@ footer .note {
   }
 }
 @media (max-width: 520px) {
-  .stats {
-    grid-template-columns: repeat(2, 1fr);
-  }
   .single-form .row1 {
     flex-direction: column;
   }

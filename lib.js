@@ -48,10 +48,11 @@ export function initials(name) {
 }
 
 // ---- pick eligibility --------------------------------------------
-// The random roll's candidate names: present, not yet answered, and never the
-// host. Mirrors the server-side pool.
+// The random roll's candidate names: present, not yet answered, and not opted
+// out (excluded). The host is included — a full participant. Mirrors the
+// server-side pool.
 export function eligibleNames(s) {
-  return s.participants.filter((p) => p.present && !p.answered && !p.is_host).map((p) => p.name);
+  return s.participants.filter((p) => p.present && !p.answered && !p.excluded).map((p) => p.name);
 }
 
 // ---- localStorage: the host's topic set (no server persistence) --
@@ -119,6 +120,36 @@ export function showWelcome(s, onboarded) {
   return !onboarded && !s.demo && s.topics.length === 0 && s.participants.length === 0;
 }
 
+// ---- localStorage: surprise mode (hide topics until picked) ------
+// A host-only display preference, kept in this browser like the onboarded flag
+// and consulted at render time. When on, open topics are masked on the board
+// and in the picking grid; the text is revealed only once a topic is picked.
+const CONCEAL_KEY = "tabletopics.conceal.v1";
+
+export function loadConceal() {
+  try {
+    return localStorage.getItem(CONCEAL_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveConceal(on) {
+  try {
+    if (on) localStorage.setItem(CONCEAL_KEY, "1");
+    else localStorage.removeItem(CONCEAL_KEY);
+  } catch {
+    /* private mode / quota — non-fatal */
+  }
+}
+
+// Whether a topic's text should be masked right now: surprise mode is on AND the
+// topic hasn't been picked yet (still "open"). Active/done topics always show —
+// they've already been revealed to the room.
+export function isConcealed(status, conceal) {
+  return !!conceal && status === "open";
+}
+
 // ---- view / board decision logic ---------------------------------
 // Which top-level view a snapshot maps to: focus > picking > board.
 export function nextView(s) {
@@ -157,5 +188,12 @@ export function cardClass(status, choose, lockedOut) {
 }
 
 export function chipClass(p) {
-  return ["chip", p.answered ? "answered" : "", p.present ? "" : "left"].filter(Boolean).join(" ");
+  return [
+    "chip",
+    p.answered ? "answered" : "",
+    p.excluded ? "excluded" : "",
+    p.present ? "" : "left",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
