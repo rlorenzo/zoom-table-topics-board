@@ -83,6 +83,7 @@ class Participant(TypedDict):
     present: bool
     answered: bool
     is_host: bool
+    excluded: bool  # opted out of the random roll ("don't call them")
 
 
 class Topic(TypedDict):
@@ -494,10 +495,10 @@ def read_zoom_participants(
 # Loaded by start_demo() so a first-time host can try the whole flow (roll a
 # name, hand over a prompt, run the focus view) without a live Zoom meeting.
 # Stopping the demo wipes all of it back to a clean slate. The host is listed
-# first so they land in order[0]; they're excluded from the roll, leaving six
-# eligible speakers for a full sample round.
+# first so they land in order[0]; they're a full participant too, so a sample
+# round has seven eligible speakers.
 DEMO_PARTICIPANTS: list[tuple[str, bool]] = [
-    ("Sam Rivera", True),  # the host runs the board and is skipped by the roll
+    ("Sam Rivera", True),  # runs the board; the HOST badge, but rolled like anyone
     ("Maya Chen", False),
     ("Diego Santos", False),
     ("Priya Patel", False),
@@ -584,6 +585,7 @@ class State:
             "present": True,
             "answered": False,
             "is_host": False,
+            "excluded": False,
         }
         if pid not in self.order:
             self.order.append(pid)
@@ -825,12 +827,13 @@ class State:
 
     # --- selection & assignment -------------------------------------------
     def _eligible_pool(self, exclude_pid: str | None) -> list[str]:
-        """Participants who can be rolled: present, not yet answered, not the
-        host (the host runs the board), and not the just-excluded person."""
+        """Participants who can be rolled: present, not yet answered, not opted
+        out (excluded), and not the just-excluded person from a 'pick someone
+        else'. The host is a full participant and is rolled like anyone else."""
         pool = []
         for pid in self.order:
             p = self.participants.get(pid)
-            if not p or not p["present"] or p["answered"] or p["is_host"]:
+            if not p or not p["present"] or p["answered"] or p["excluded"]:
                 continue
             if pid == exclude_pid:
                 continue
@@ -862,9 +865,27 @@ class State:
         this round is rejected, the same one-turn rule the random roll uses."""
         with self.lock:
             p = self.participants.get(pid)
-            if not p or not p["present"] or p["answered"]:
+            if not p or not p["present"] or p["answered"] or p["excluded"]:
                 return False
             self.selected_pid = pid
+        self.broadcast()
+        return True
+
+    def set_excluded(self, pid: str, val: bool) -> bool:
+        """Toggle whether a participant is skipped by the random roll: an opt-out
+        for someone who doesn't want to be called, or a way to narrow the pool to
+        people who haven't spoken. Excluded people are dropped from the roll and
+        can't be manually selected either, until un-excluded. A pending selection
+        on the now-excluded person is dropped so clients don't strand on the
+        picking view. The flag persists across reset() (a new round doesn't
+        un-opt-out anyone)."""
+        with self.lock:
+            p = self.participants.get(pid)
+            if not p:
+                return False
+            p["excluded"] = bool(val)
+            if p["excluded"] and self.selected_pid == pid:
+                self.selected_pid = None
         self.broadcast()
         return True
 
@@ -908,9 +929,12 @@ class State:
         self.broadcast()
         return True
 
-    def reopen_topic(self, tid: str) -> bool:
+    def reopen_topic(self, tid: str, reselect: bool = False) -> bool:
         """Undo an active/done topic back to open (the focus 'Back' button and
-        the board 'reopen' affordance). The assignee returns to the pool."""
+        the board 'reopen' affordance). The assignee returns to the pool. When
+        `reselect` is set (the focus 'Back' case), re-select that person so we
+        land back on the picking view with the topic list, ready to pick a
+        different topic."""
         with self.lock:
             t = self.topics.get(tid)
             if not t:
@@ -922,6 +946,10 @@ class State:
             t["status"] = "open"
             if self.active_topic_id == tid:
                 self.active_topic_id = None
+            if reselect and aid:
+                ap = self.participants.get(aid)
+                if ap is not None and ap["present"]:
+                    self.selected_pid = aid
         self.broadcast()
         return True
 
@@ -972,6 +1000,7 @@ class State:
                     "present": True,
                     "answered": False,
                     "is_host": is_host,
+                    "excluded": False,
                 }
                 self.order.append(pid)
             for t in DEMO_TOPICS:
@@ -1109,7 +1138,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(404, {"error": "not found"})
 
     TOPIC_ROUTE = re.compile(r"^/api/topic/([^/]+)/(edit|remove|done|reopen|assign)$")
-    PARTICIPANT_ROUTE = re.compile(r"^/api/participant/([^/]+)/(host|remove)$")
+    PARTICIPANT_ROUTE = re.compile(r"^/api/participant/([^/]+)/(host|remove|exclude)$")
 
     def do_POST(self) -> None:
         if not self._origin_ok():
@@ -1136,6 +1165,8 @@ class Handler(BaseHTTPRequestHandler):
     def _participant_action(self, pid: str, action: str) -> None:
         if action == "host":
             ok = STATE.set_host(pid, bool(self._read_json().get("host")))
+        elif action == "exclude":
+            ok = STATE.set_excluded(pid, bool(self._read_json().get("excluded")))
         else:  # remove
             STATE.remove(pid)
             ok = True
@@ -1168,7 +1199,10 @@ class Handler(BaseHTTPRequestHandler):
         elif action == "done":
             ok = STATE.mark_done(tid)
         elif action == "reopen":
-            ok = STATE.reopen_topic(tid)
+            # Read the body even though only the focus "Back" sends one, so an
+            # unconsumed payload can't desync the next keep-alive request.
+            body = self._read_json()
+            ok = STATE.reopen_topic(tid, reselect=bool(body.get("reselect", False)))
         else:  # assign
             ok = STATE.assign(tid)
         self._json(200 if ok else 400, {"ok": ok})
@@ -1220,7 +1254,6 @@ Handler._STATIC_POST = {
 # --- Reader poller thread --------------------------------------------------
 def poller(args: argparse.Namespace, exclude_re: re.Pattern[str]) -> None:
     pat_warned = False
-    empty_reads = 0
     while True:
         try:
             people = read_zoom_participants(args, exclude_re)
@@ -1232,19 +1265,20 @@ def poller(args: argparse.Namespace, exclude_re: re.Pattern[str]) -> None:
                         "[reader] Zoom not running yet; will keep checking.\n"
                     )
                     pat_warned = True
-                empty_reads = 0
             elif people:
                 pat_warned = False
-                empty_reads = 0
                 STATE.sync_participants(people)
             else:
-                # Zoom is up but the read came back empty. A single empty read is
-                # usually a transient redraw / collapsed panel, so only trust it
-                # after two in a row before clearing out departed participants.
+                # Zoom is up but the read came back empty. During a live meeting
+                # the Participants panel is never legitimately empty, so an empty
+                # read almost always means "can't see the panel" — it's collapsed,
+                # or screen-sharing the board has moved/closed it — not "everyone
+                # left". Treat it like Zoom-not-running and leave the roster
+                # intact, so sharing the board doesn't strand the host on an empty
+                # room. A genuine departure is still caught on the next readable
+                # poll, where the missing name is simply absent from a non-empty
+                # list (sync_participants -> _mark_missing_as_left).
                 pat_warned = False
-                empty_reads += 1
-                if empty_reads >= 2:
-                    STATE.sync_participants([])
         except Exception as e:
             sys.stderr.write(f"[reader] read error: {e}\n")
         time.sleep(args.interval)

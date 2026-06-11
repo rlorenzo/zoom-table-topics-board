@@ -7,12 +7,15 @@ import {
   escapeHtml,
   fmtTime,
   initials,
+  isConcealed,
+  loadConceal,
   loadOnboarded,
   loadStoredTopics,
   newlyDoneId,
   nextView,
   parsePaste,
   pickHint,
+  saveConceal,
   saveOnboarded,
   saveStoredTopics,
   showWelcome,
@@ -28,6 +31,13 @@ const ICON_DONE = `<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="curre
 const ICON_PERSON = `<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="5" r="2.5"/><path d="M3.5 13a4.5 4.5 0 0 1 9 0"/></svg>`;
 const ICON_DOT = `<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="currentColor"/></svg>`;
 const ICON_OPEN = `<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="8" cy="8" r="4.5"/></svg>`;
+// Surprise-mode mask: an eye with a slash, shown in place of a hidden headline.
+const ICON_HIDDEN = `<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="1.6"/><path d="M3 13L13 3"/></svg>`;
+// Sit-out toggle uses calm media-player semantics: pause a person to bench them
+// from the roll, press play to bring them back. Pause doubles as the "sitting
+// out" state icon on a benched chip. Deliberately neutral, never the danger hue.
+const ICON_PAUSE = `<svg class="ic" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="4.6" y="3.5" width="2.3" height="9" rx="1"/><rect x="9.1" y="3.5" width="2.3" height="9" rx="1"/></svg>`;
+const ICON_PLAY = `<svg class="ic" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3.9v8.2a1 1 0 0 0 1.52.85l6.83-4.1a1 1 0 0 0 0-1.7L6.52 3.05A1 1 0 0 0 5 3.9z"/></svg>`;
 
 const $ = (id) => document.getElementById(id);
 const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -66,6 +76,11 @@ let seededThisLoad = false;
 // Whether this browser has seen the first-run welcome. Held in memory so a
 // dismiss re-renders instantly; mirrored to localStorage so it sticks.
 let onboarded = loadOnboarded();
+
+// Surprise mode: when on, open topics are masked on the board and in the
+// picking grid, and revealed only once picked. A host-only display preference,
+// held in memory (like onboarded) and mirrored to localStorage so it sticks.
+let conceal = loadConceal();
 
 // ====================================================================
 //  RENDER  — derive the active view purely from snapshot state.
@@ -225,6 +240,17 @@ function cardDetails(t) {
   return t.details && t.status !== "open" ? `<div class="dt">${escapeHtml(t.details)}</div>` : "";
 }
 
+// In surprise mode an open topic's text stays masked until it's picked, so the
+// screen-shared board (and the picking grid) give nothing away in advance. The
+// real headline is never emitted into the DOM for a concealed card.
+function cardHeadline(t, opts) {
+  if (!isConcealed(t.status, conceal)) {
+    return `<div class="hl">${escapeHtml(t.headline)}</div>`;
+  }
+  const tag = opts.pos ? ` #${opts.pos}` : "";
+  return `<div class="hl hl-hidden">${ICON_HIDDEN}<span>Hidden topic${tag}</span></div>`;
+}
+
 function cardAssignee(t) {
   return t.assignee
     ? `<div class="assignee">${ICON_PERSON}<span class="who">${escapeHtml(t.assignee.name)}</span></div>`
@@ -251,16 +277,21 @@ function cardReopen(t, opts) {
 function topicCard(t, opts = {}) {
   const choose = !!opts.choose && t.status === "open";
   const lockedOut = !!opts.pickMode && t.status !== "open";
+  const masked = isConcealed(t.status, conceal);
   const inner =
     cardStatusTag(t) +
-    `<div class="hl">${escapeHtml(t.headline)}</div>` +
+    cardHeadline(t, opts) +
     cardDetails(t) +
     cardAssignee(t) +
     cardReopen(t, opts);
-  const cls = cardClass(t.status, choose, lockedOut);
+  const cls = cardClass(t.status, choose, lockedOut) + (masked ? " concealed" : "");
   if (choose) {
-    // A real button so it's keyboard-operable; click assigns the topic.
-    return `<button class="${cls}" type="button" data-act="assign" data-tid="${t.id}">${inner}</button>`;
+    // A real button so it's keyboard-operable; click assigns the topic. When
+    // masked, name it for screen readers since the visible text is a placeholder.
+    const label = masked
+      ? ` aria-label="Hidden topic${opts.pos ? ` ${opts.pos}` : ""}, pick to reveal"`
+      : "";
+    return `<button class="${cls}" type="button" data-act="assign" data-tid="${t.id}"${label}>${inner}</button>`;
   }
   // Static card (board open/active/done, or picking locked-out).
   return `<div class="${cls}" data-tid="${t.id}">${cardTools(t, opts)}${inner}</div>`;
@@ -291,17 +322,13 @@ function renderBoard(s) {
 
   const present = s.participants.filter((p) => p.present);
   const answered = present.filter((p) => p.answered).length;
-  // "Still to go" mirrors the server pool: present, not answered, not host.
-  const toGo = present.filter((p) => !p.answered && !p.is_host).length;
+  // "Still to go" mirrors the server pool: present, not answered, not opted out
+  // (excluded). The host counts too — they're a full participant.
+  const toGo = present.filter((p) => !p.answered && !p.excluded).length;
   const tDone = s.topics.filter((t) => t.status === "done").length;
   const tTotal = s.topics.length;
   const openCount = s.topics.filter((t) => t.status === "open").length;
 
-  $("s-togo").textContent = toGo;
-  $("s-answered").textContent = answered;
-  $("s-room").textContent = present.length;
-  $("s-tdone").textContent = tDone;
-  $("s-ttotal").textContent = tTotal;
   $("topicsAux").textContent = topicAux({ tTotal, openCount, tDone });
 
   const host = $("topicsHost");
@@ -312,29 +339,52 @@ function renderBoard(s) {
            <button class="btn" type="button" data-act="open-add">Add topics</button>
          </div>`;
   } else {
-    host.innerHTML = `<div class="topics">${s.topics.map((t) => topicCard(t, {})).join("")}</div>`;
+    host.innerHTML = `<div class="topics">${s.topics.map((t, i) => topicCard(t, { pos: i + 1 })).join("")}</div>`;
   }
   celebrateNewlyDone(host);
 
   renderRoster(s);
 
-  // Primary CTA: toGo is exactly the pick-eligible pool (present, !answered, !host).
+  // Primary CTA: toGo is exactly the pick-eligible pool (present, !answered, !excluded).
   const hasOpen = openCount > 0;
   $("pickBtn").disabled = toGo === 0 || !hasOpen;
-  $("pickHint").textContent = pickHint({ toGo, answered, hasOpen });
+  // The hint line under the CTA carries the live "still to go" count while a
+  // round is in progress (the number is the one metric the host paces by);
+  // otherwise it explains why the pick is unavailable.
+  if (toGo > 0 && hasOpen) {
+    $("pickHint").innerHTML = `<b>${toGo}</b> still to go`;
+  } else {
+    $("pickHint").textContent = pickHint({ toGo, answered, hasOpen });
+  }
 }
 
 function rosterStateIcon(p) {
   if (!p.present) return ICON_DOT;
   if (p.answered) return `<span class="state-ic done">${ICON_DONE}</span>`;
+  if (p.excluded) return `<span class="state-ic sitting">${ICON_PAUSE}</span>`;
   return `<span class="state-ic present">${ICON_OPEN}</span>`;
+}
+
+// The sit-out toggle: bench a present, not-yet-answered person from the random
+// roll, or bring them back. The host gets one too (they're a full participant);
+// only hidden for people who already had their turn. Pause = sit out, play =
+// bring back; aria-pressed carries the on/off state.
+function rosterSkipBtn(p) {
+  if (!p.present || p.answered) return "";
+  const name = escapeHtml(p.name);
+  const label = p.excluded ? `Bring ${name} back in` : `Have ${name} sit out`;
+  const icon = p.excluded ? ICON_PLAY : ICON_PAUSE;
+  return (
+    `<button class="skip" type="button" data-act="exclude" data-pid="${p.id}" ` +
+    `aria-pressed="${p.excluded}" aria-label="${label}" title="${label}">${icon}</button>`
+  );
 }
 
 function rosterChip(p) {
   // Clicking a present name manually selects them (host included). Someone who
-  // already had their turn isn't selectable — same one-turn rule as the random
-  // roll, and the server rejects it anyway.
-  const canSelect = p.present && !p.answered;
+  // already had their turn — or is sitting out — isn't selectable; same rule as
+  // the random roll, and the server rejects it anyway.
+  const canSelect = p.present && !p.answered && !p.excluded;
   const hostPill = p.is_host ? `<span class="host-pill">host</span>` : "";
   const nameBtn =
     `<button class="pick-name" type="button" ${canSelect ? "" : "disabled"} data-act="select" data-pid="${p.id}">` +
@@ -342,17 +392,24 @@ function rosterChip(p) {
     `<span class="who">${escapeHtml(p.name)}</span>` +
     hostPill +
     `</button>`;
+  // A calm "sitting out" tag (no strikethrough, no danger hue): the friendly
+  // sibling of the "answered" state, signalling parked, not removed.
+  const tag = p.excluded ? `<span class="chip-tag">Sitting out</span>` : "";
   const removeBtn = `<button class="x" type="button" data-act="remove-p" data-pid="${p.id}" aria-label="Remove ${escapeHtml(p.name)}">${ICON_X}</button>`;
-  return `<span class="${chipClass(p)}">${nameBtn}${removeBtn}</span>`;
+  return `<span class="${chipClass(p)}">${nameBtn}${tag}${rosterSkipBtn(p)}${removeBtn}</span>`;
 }
 
 function renderRoster(s) {
   const roster = $("roster");
   if (!s.participants.length) {
     roster.innerHTML = `<div class="empty" style="width:100%">No one yet. Joins appear automatically, or add someone below.</div>`;
-    return;
+  } else {
+    roster.innerHTML = s.participants.map(rosterChip).join("");
   }
-  roster.innerHTML = s.participants.map(rosterChip).join("");
+  // The skip-icon legend only makes sense when at least one chip actually shows
+  // a skip toggle (a present person who hasn't gone yet).
+  const anySkippable = s.participants.some((p) => p.present && !p.answered);
+  $("rosterLegend").hidden = !anySkippable;
 }
 
 // ============================= PICKING =============================
@@ -446,7 +503,7 @@ function startTopicRoll(cards, targetIdx) {
 // incoming snapshot.
 function renderPickChoices(s) {
   const choices = s.topics
-    .map((t) => topicCard(t, { pickMode: true, choose: t.status === "open" }))
+    .map((t, i) => topicCard(t, { pickMode: true, choose: t.status === "open", pos: i + 1 }))
     .join("");
   $("pickTopicsHost").innerHTML = s.topics.length
     ? `<div class="topics">${choices}</div>`
@@ -471,6 +528,19 @@ function renderPicking(s) {
   applyReveal(s, sel, isNew);
 }
 
+// Size the spotlight name to its length so a long name doesn't overflow the
+// stage (it's overflow:hidden, so the excess is clipped) and shove the topic
+// choices off-screen. Short names keep the full dramatic display size; longer
+// ones step down so the whole name and the choices stay on screen.
+function fitShuffleName(name) {
+  const n = (name || "").length;
+  let size = ""; // default clamp from CSS — the largest, for short names
+  if (n > 30) size = "clamp(1.7rem, 4.6vw, 3.1rem)";
+  else if (n > 22) size = "clamp(2rem, 5.6vw, 3.8rem)";
+  else if (n > 15) size = "clamp(2.3rem, 6.6vw, 4.6rem)";
+  $("shuffleName").style.fontSize = size;
+}
+
 function startReveal(s, sel) {
   revealActive = true;
   clearShuffle();
@@ -489,6 +559,7 @@ function startReveal(s, sel) {
   choicesBox.classList.remove("show");
   nameEl.classList.remove("settled", "flourish");
   $("stage").classList.remove("lit"); // dim the spotlight while rolling
+  fitShuffleName(sel.name);
 
   if (reduceMotion()) {
     // Skip straight to the settled name — motion is never the only carrier.
@@ -531,6 +602,7 @@ function settleReveal(sel, burst = false) {
   nameEl.classList.remove("cycling");
   nameEl.classList.add("settled");
   nameEl.textContent = sel ? sel.name : "";
+  fitShuffleName(sel ? sel.name : "");
   if (!reduceMotion()) {
     // restart the pop animation
     nameEl.classList.remove("flourish");
@@ -619,9 +691,23 @@ function showTab(which) {
   $("tabPaste").setAttribute("aria-selected", String(!single));
   $("singleForm").hidden = !single;
   $("pasteForm").hidden = single;
+  if (!single) growPaste(); // size the box now that it's visible
 }
 $("tabSingle").addEventListener("click", () => showTab("single"));
 $("tabPaste").addEventListener("click", () => showTab("paste"));
+
+// The paste box grows to fit its content (up to a cap, then scrolls) so a long
+// pasted list isn't hidden behind a short, fixed-height box and read as "cut
+// off". Only meaningful while visible; CSS min-height handles the empty state.
+const PASTE_MAX_H = 400;
+function growPaste() {
+  const ta = $("pasteBox");
+  if (ta.hidden || !ta.offsetParent) return;
+  ta.style.height = "auto";
+  const borders = ta.offsetHeight - ta.clientHeight; // border-box: add borders back
+  ta.style.height = `${Math.min(ta.scrollHeight + borders, PASTE_MAX_H)}px`;
+}
+$("pasteBox").addEventListener("input", growPaste);
 
 // ---- Add-topic editor toggle (collapsed by default) --------------
 function setAddOpen(open) {
@@ -631,13 +717,25 @@ function setAddOpen(open) {
 }
 function openAddEditor() {
   setAddOpen(true);
-  $("addArea").scrollIntoView({
+  // Scroll to the section header so the jump down is visible, then focus the
+  // first field without letting focus() yank the scroll to the input itself.
+  $("addToggle").scrollIntoView({
     behavior: reduceMotion() ? "auto" : "smooth",
-    block: "nearest",
+    block: "start",
   });
-  $("hl").focus();
+  $("hl").focus({ preventScroll: true });
 }
 $("addToggle").addEventListener("click", () => setAddOpen($("addArea").hidden));
+
+// ---- Surprise mode toggle (hide topics until picked) -------------
+// Reflect the saved preference, then re-render the board in place on change.
+// The checkbox lives in the board's editor, so it's only reachable on the board.
+$("concealTopics").checked = conceal;
+$("concealTopics").addEventListener("change", (e) => {
+  conceal = e.target.checked;
+  saveConceal(conceal);
+  renderBoard(state);
+});
 
 // ---- Add one topic -----------------------------------------------
 $("singleForm").addEventListener("submit", async (e) => {
@@ -665,6 +763,7 @@ $("pasteForm").addEventListener("submit", async (e) => {
   }
   $("pasteBox").value = "";
   $("pasteReplace").checked = false;
+  growPaste(); // shrink back now that it's empty
   await post("/api/topics", { topics, replace });
 });
 
@@ -699,7 +798,9 @@ $("focusDoneBtn").addEventListener("click", () => {
 });
 $("focusBackBtn").addEventListener("click", () => {
   const tid = $("focusBackBtn").dataset.tid;
-  if (tid) post(`/api/topic/${tid}/reopen`);
+  // Back from the focus view: reopen the topic but keep the same person up, so
+  // we return to the topic list to pick a different one (not all the way out).
+  if (tid) post(`/api/topic/${tid}/reopen`, { reselect: true });
 });
 
 // ---- Global click delegation (topic cards, roster chips) ---------
@@ -710,6 +811,11 @@ const CLICK_ACTIONS = {
   edit: (tid) => tid && editTopic(tid),
   select: (_tid, pid) => pid && post("/api/select", { pid }),
   "remove-p": (_tid, pid) => pid && post(`/api/participant/${pid}/remove`),
+  exclude: (_tid, pid) => {
+    if (!pid) return;
+    const p = state.participants.find((x) => x.id === pid);
+    if (p) post(`/api/participant/${pid}/exclude`, { excluded: !p.excluded });
+  },
   "open-add": () => openAddEditor(),
 };
 document.addEventListener("click", (e) => {
@@ -824,12 +930,13 @@ function serverTransport() {
 const LOCAL_ROUTES = [
   [/^\/api\/participant$/, (e, _m, b) => e.addParticipant(b.name)],
   [/^\/api\/participant\/([^/]+)\/remove$/, (e, m) => e.removeParticipant(m[1])],
+  [/^\/api\/participant\/([^/]+)\/exclude$/, (e, m, b) => e.setExcluded(m[1], b.excluded)],
   [/^\/api\/topic$/, (e, _m, b) => e.addTopic(b.headline, b.details)],
   [/^\/api\/topics$/, (e, _m, b) => e.addTopics(b.topics, b.replace)],
   [/^\/api\/topic\/([^/]+)\/edit$/, (e, m, b) => e.editTopic(m[1], b.headline, b.details)],
   [/^\/api\/topic\/([^/]+)\/remove$/, (e, m) => e.removeTopic(m[1])],
   [/^\/api\/topic\/([^/]+)\/done$/, (e, m) => e.markDone(m[1])],
-  [/^\/api\/topic\/([^/]+)\/reopen$/, (e, m) => e.reopenTopic(m[1])],
+  [/^\/api\/topic\/([^/]+)\/reopen$/, (e, m, b) => e.reopenTopic(m[1], b.reselect)],
   [/^\/api\/topic\/([^/]+)\/assign$/, (e, m) => e.assign(m[1])],
   [/^\/api\/pick$/, (e, _m, b) => e.pick(b.exclude)],
   [/^\/api\/select$/, (e, _m, b) => e.select(b.pid)],

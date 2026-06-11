@@ -7,12 +7,15 @@ import {
   escapeHtml,
   fmtTime,
   initials,
+  isConcealed,
+  loadConceal,
   loadOnboarded,
   loadStoredTopics,
   newlyDoneId,
   nextView,
   parsePaste,
   pickHint,
+  saveConceal,
   saveOnboarded,
   saveStoredTopics,
   showWelcome,
@@ -60,7 +63,7 @@ describe("parsePaste", () => {
 });
 
 describe("eligibleNames", () => {
-  it("returns present, unanswered, non-host names in order", () => {
+  it("returns present, unanswered names in order, host included", () => {
     const s = {
       participants: [
         { name: "Host", present: true, answered: false, is_host: true },
@@ -70,13 +73,22 @@ describe("eligibleNames", () => {
         { name: "Dee", present: true, answered: false, is_host: false },
       ],
     };
-    expect(eligibleNames(s)).toEqual(["Ann", "Dee"]);
+    expect(eligibleNames(s)).toEqual(["Host", "Ann", "Dee"]);
   });
-  it("excludes the host even when otherwise eligible", () => {
+  it("includes the host (a full participant)", () => {
     const s = {
       participants: [{ name: "Host", present: true, answered: false, is_host: true }],
     };
-    expect(eligibleNames(s)).toEqual([]);
+    expect(eligibleNames(s)).toEqual(["Host"]);
+  });
+  it("excludes opted-out (excluded) people", () => {
+    const s = {
+      participants: [
+        { name: "Ann", present: true, answered: false, is_host: false, excluded: true },
+        { name: "Bob", present: true, answered: false, is_host: false, excluded: false },
+      ],
+    };
+    expect(eligibleNames(s)).toEqual(["Bob"]);
   });
 });
 
@@ -132,6 +144,32 @@ describe("onboarded flag", () => {
   it("reads true after saveOnboarded", () => {
     saveOnboarded();
     expect(loadOnboarded()).toBe(true);
+  });
+});
+
+describe("conceal flag", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it("is false until set", () => {
+    expect(loadConceal()).toBe(false);
+  });
+  it("round-trips on then off", () => {
+    saveConceal(true);
+    expect(loadConceal()).toBe(true);
+    saveConceal(false);
+    expect(loadConceal()).toBe(false);
+  });
+});
+
+describe("isConcealed", () => {
+  it("masks an open topic only while surprise mode is on", () => {
+    expect(isConcealed("open", true)).toBe(true);
+    expect(isConcealed("open", false)).toBe(false);
+  });
+  it("never masks a picked topic, even in surprise mode", () => {
+    expect(isConcealed("active", true)).toBe(false);
+    expect(isConcealed("done", true)).toBe(false);
   });
 });
 
@@ -244,5 +282,6 @@ describe("cardClass / chipClass", () => {
     expect(chipClass({ answered: true, present: true })).toBe("chip answered");
     expect(chipClass({ answered: false, present: false })).toBe("chip left");
     expect(chipClass({ answered: false, present: true })).toBe("chip");
+    expect(chipClass({ answered: false, present: true, excluded: true })).toBe("chip excluded");
   });
 });

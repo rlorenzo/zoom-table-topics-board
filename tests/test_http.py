@@ -266,6 +266,21 @@ class TestTopicActions:
         assert code == 200
         assert body == {"ok": True}
         assert STATE.snapshot()["topics"][0]["status"] == "open"
+        # No reselect in the body, so the round's selection stays cleared.
+        assert STATE.snapshot()["selected"] is None
+
+    def test_reopen_reselect_restores_the_selection(self, server):
+        # The focus "Back" button sends {"reselect": true}: the topic reopens and
+        # the same person is put back up, ready to pick a different topic.
+        pid = _add_participant(server, "Alice")
+        tid = _add_topic(server, "Topic")
+        _post(server + "/api/select", {"pid": pid})
+        _post(f"{server}/api/topic/{tid}/assign")
+        code, body = _post(f"{server}/api/topic/{tid}/reopen", {"reselect": True})
+        assert code == 200
+        assert body == {"ok": True}
+        assert STATE.snapshot()["topics"][0]["status"] == "open"
+        assert STATE.snapshot()["selected"]["id"] == pid
 
     def test_unknown_action_returns_404(self, server):
         tid = _add_topic(server, "Topic")
@@ -357,6 +372,21 @@ class TestParticipantRoutes:
         assert code == 200
         assert body == {"ok": True}
         assert STATE.snapshot()["participants"] == []
+
+    def test_exclude_toggles_the_flag(self, server):
+        pid = _add_participant(server, "Alice")
+        code, body = _post(f"{server}/api/participant/{pid}/exclude", {"excluded": True})
+        assert code == 200
+        assert body == {"ok": True}
+        assert STATE.snapshot()["participants"][0]["excluded"] is True
+        code, _ = _post(f"{server}/api/participant/{pid}/exclude", {"excluded": False})
+        assert code == 200
+        assert STATE.snapshot()["participants"][0]["excluded"] is False
+
+    def test_exclude_unknown_pid_returns_404(self, server):
+        code, body = _post(f"{server}/api/participant/nope/exclude", {"excluded": True})
+        assert code == 404
+        assert body == {"ok": False}
 
     def test_unknown_action_returns_404(self, server):
         pid = _add_participant(server, "Alice")
