@@ -375,7 +375,9 @@ class TestParticipantRoutes:
 
     def test_exclude_toggles_the_flag(self, server):
         pid = _add_participant(server, "Alice")
-        code, body = _post(f"{server}/api/participant/{pid}/exclude", {"excluded": True})
+        code, body = _post(
+            f"{server}/api/participant/{pid}/exclude", {"excluded": True}
+        )
         assert code == 200
         assert body == {"ok": True}
         assert STATE.snapshot()["participants"][0]["excluded"] is True
