@@ -138,6 +138,8 @@ Toastmasters logo. The visual system is documented in
 
 ```bash
 uv sync --dev
+uv run pre-commit install                       # commit-stage git hooks
+uv run pre-commit install --hook-type pre-push  # push-stage git hooks
 uv run pytest          # tests
 uv run ruff check .    # lint
 uv run mypy            # type-check (strict)
