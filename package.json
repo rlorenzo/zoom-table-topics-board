@@ -20,11 +20,11 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.16",
-    "@vitest/coverage-v8": "4.1.8",
-    "fallow": "2.89.0",
-    "html-validate": "11.5.2",
+    "@vitest/coverage-v8": "4.1.9",
+    "fallow": "2.96.0",
+    "html-validate": "11.5.3",
     "jsdom": "29.1.1",
     "playwright": "^1.60.0",
-    "vitest": "4.1.8"
+    "vitest": "4.1.9"
   }
 }
