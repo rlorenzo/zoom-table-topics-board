@@ -1079,6 +1079,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             n = int(self.headers.get("Content-Length", 0))
         except ValueError:
+            # Can't trust the length, so any body bytes are unrecoverable;
+            # close so they can't desync the next keep-alive request.
+            self.close_connection = True
             return b""
         if n <= 0:
             return b""

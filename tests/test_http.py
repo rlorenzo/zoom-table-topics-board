@@ -315,6 +315,28 @@ class TestPostRouting:
         finally:
             conn.close()
 
+    def test_malformed_content_length_closes_the_connection(self, server):
+        # With an unparseable Content-Length the body length is unknowable, so
+        # the handler can't drain it — it must close the connection instead of
+        # letting the stray bytes desync the next keep-alive request.
+        host = server.removeprefix("http://")
+        conn = http.client.HTTPConnection(host, timeout=5)
+        try:
+            conn.putrequest("POST", "/api/reset")
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", "not-a-number")
+            conn.endheaders(message_body=b"{}")
+            resp = conn.getresponse()
+            assert resp.status == 200
+            resp.read()
+            # The server hung up; reusing the socket fails instead of parsing
+            # the leftover body bytes as a new request.
+            with pytest.raises((http.client.RemoteDisconnected, ConnectionError)):
+                conn.request("POST", "/api/reset", body=b"{}")
+                conn.getresponse()
+        finally:
+            conn.close()
+
 
 class TestSelection:
     def test_pick_returns_selected(self, server):
