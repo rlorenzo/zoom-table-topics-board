@@ -19,10 +19,13 @@ import {
   saveOnboarded,
   saveStoredTopics,
   showWelcome,
+  TOPICS_STORAGE_KEY,
   topicAux,
 } from "./lib.js";
 
-const LS_KEY = "tabletopics.topics.v1";
+// Imported, not re-declared: a version bump of the storage key must not leave
+// these tests silently seeding a key the loader no longer reads.
+const LS_KEY = TOPICS_STORAGE_KEY;
 
 describe("escapeHtml", () => {
   it("escapes the five HTML-significant characters", () => {
@@ -250,10 +253,24 @@ describe("newlyDoneId", () => {
 
 describe("pickHint", () => {
   it("says everyone went when the pool is empty but someone answered", () => {
-    expect(pickHint({ toGo: 0, answered: 3, hasOpen: true })).toBe("Everyone has had a topic.");
+    expect(pickHint({ toGo: 0, answered: 3, hasOpen: true, sittingOut: 0 })).toBe(
+      "Everyone has had a topic.",
+    );
   });
   it("asks for people when the room is empty", () => {
-    expect(pickHint({ toGo: 0, answered: 0, hasOpen: true })).toBe("Add people to the room first.");
+    expect(pickHint({ toGo: 0, answered: 0, hasOpen: true, sittingOut: 0 })).toBe(
+      "Add people to the room first.",
+    );
+  });
+  it("points at the sit-out state when benched people empty the pool", () => {
+    // A populated room where the unanswered are all sitting out is neither
+    // "empty" nor "finished" — misdirecting the host hides the fix (unpause).
+    expect(pickHint({ toGo: 0, answered: 0, hasOpen: true, sittingOut: 2 })).toBe(
+      "Everyone still to go is sitting out.",
+    );
+    expect(pickHint({ toGo: 0, answered: 1, hasOpen: true, sittingOut: 1 })).toBe(
+      "Everyone still to go is sitting out.",
+    );
   });
   it("asks for a topic when none are open", () => {
     expect(pickHint({ toGo: 2, answered: 0, hasOpen: false })).toBe("Add an open topic to pick.");

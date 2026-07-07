@@ -68,8 +68,9 @@ whole setup.
    or your next meeting pre-fills them. Nothing is stored on a server, and
    nothing is shared automatically.
 2. **Pick someone.** Hit *Pick next participant*. The board rolls a random person
-   who has not answered yet (the host is skipped by default, since you are
-   running it). Do not like the draw? Pick again.
+   who has not answered yet — the host included, since they are a full
+   participant (anyone can sit out via the pause toggle on their name). Do not
+   like the draw? Pick again.
 3. **Hand them a topic.** Click an open topic, or hit *Surprise me* for a
    Press-Your-Luck spin that lands on a random one. The topic locks to that
    person and the screen goes full-screen with their name, the prompt, and any

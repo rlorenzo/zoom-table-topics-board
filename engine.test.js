@@ -63,6 +63,7 @@ describe("addParticipant", () => {
     expect(p.answered).toBe(false);
     expect(p.is_host).toBe(false);
     expect(p.excluded).toBe(false);
+    expect(p.source).toBe("manual");
     expect(p.leftTime).toBeNull();
     expect(typeof p.joinTime).toBe("number");
   });
@@ -115,6 +116,15 @@ describe("topics", () => {
     ]);
     expect(added).toBe(1);
     expect(engine.snapshot().topics.map((t) => t.headline)).toEqual(["Real"]);
+  });
+
+  it("addTopics tolerates a non-array payload without throwing mid-wipe", () => {
+    // A truthy non-iterable must not throw after the replace-wipe, which
+    // would leave subscribers rendering a stale pre-wipe snapshot.
+    engine.addTopic("Old");
+    const added = engine.addTopics({ headline: "not a list" }, true);
+    expect(added).toBe(0);
+    expect(engine.snapshot().topics).toEqual([]);
   });
 
   it("addTopics replace clears the existing set first", () => {
@@ -306,6 +316,18 @@ describe("pick", () => {
     expect(chosen).toBe(pidOf(engine, "Carol"));
     spy.mockRestore();
   });
+
+  it("someone holding an active topic is not rolled", () => {
+    engine.addParticipant("Alice");
+    engine.addParticipant("Bob");
+    const tid = engine.addTopic("T1");
+    engine.select(pidOf(engine, "Alice"));
+    engine.assign(tid);
+    // Alice is mid-answer on an active topic; only Bob can be rolled.
+    for (let i = 0; i < 20; i++) {
+      expect(engine.pick()).toBe(pidOf(engine, "Bob"));
+    }
+  });
 });
 
 describe("select", () => {
@@ -338,6 +360,13 @@ describe("select", () => {
     const pid = pidOf(engine, "Alice");
     engine.setExcluded(pid, true);
     expect(engine.select(pid)).toBe(false);
+  });
+
+  it("someone holding an active topic cannot be selected again", () => {
+    // Selecting them again would let a second topic be assigned to one person.
+    const { pid } = setupActiveTopic(engine);
+    expect(engine.select(pid)).toBe(false);
+    expect(engine.snapshot().selected).toBeNull();
   });
 });
 
@@ -493,6 +522,15 @@ describe("reopenTopic", () => {
     expect(engine.reopenTopic(tid)).toBe(true);
     expect(engine.snapshot().selected).toBeNull();
   });
+
+  it("reselect skips an assignee who opted out after being assigned", () => {
+    // setExcluded promises an excluded person can never end up selected, so
+    // the focus "Back" button must not re-select them.
+    const { pid, tid } = setupActiveTopic(engine);
+    engine.setExcluded(pid, true);
+    expect(engine.reopenTopic(tid, true)).toBe(true);
+    expect(engine.snapshot().selected).toBeNull();
+  });
 });
 
 describe("reset", () => {
@@ -576,6 +614,11 @@ describe("demo", () => {
     engine.startDemo();
     const ids = engine.snapshot().participants.map((p) => p.id);
     expect(ids).toEqual(["d0", "d1", "d2", "d3", "d4", "d5", "d6"]);
+  });
+
+  it("startDemo stamps every entry with source 'demo'", () => {
+    engine.startDemo();
+    expect(engine.snapshot().participants.every((p) => p.source === "demo")).toBe(true);
   });
 
   it("startDemo leaves a rollable pool", () => {
@@ -694,5 +737,15 @@ describe("subscribe", () => {
     engine.addParticipant("Alice");
     expect(a).toHaveBeenCalledTimes(2);
     expect(b).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives each listener its own snapshot — one mutating cannot corrupt the next", () => {
+    engine.subscribe((snap) => {
+      if (snap.participants.length) snap.participants[0].name = "Corrupted";
+    });
+    const seen = [];
+    engine.subscribe((snap) => seen.push(snap));
+    engine.addParticipant("Alice");
+    expect(seen.at(-1).participants[0].name).toBe("Alice");
   });
 });

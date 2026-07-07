@@ -44,7 +44,7 @@ export function initials(name) {
   if (!words.length) return "·";
   const pick = words.length === 1 ? [words[0]] : [words[0], words[words.length - 1]];
   const letters = pick.map((w) => [...w].find((c) => /[\p{L}\p{N}]/u.test(c)) || "").join("");
-  return (letters || [...words[0]].find((c) => /[\p{L}\p{N}]/u.test(c)) || "·").toUpperCase();
+  return (letters || "·").toUpperCase();
 }
 
 // ---- pick eligibility --------------------------------------------
@@ -56,7 +56,10 @@ export function eligibleNames(s) {
 }
 
 // ---- localStorage: the host's topic set (no server persistence) --
-const LS_KEY = "tabletopics.topics.v1";
+// Exported so tests seed the same key the loader reads — a version bump here
+// can't silently leave tests writing to a dead key.
+export const TOPICS_STORAGE_KEY = "tabletopics.topics.v1";
+const LS_KEY = TOPICS_STORAGE_KEY;
 
 export function loadStoredTopics() {
   try {
@@ -166,9 +169,13 @@ export function newlyDoneId(prevTopics, topics) {
   return nowDone.length === 1 ? nowDone[0].id : null;
 }
 
-// The pick-button hint: distinguishes "round finished" from "room still empty"
-// rather than keying off whether topics exist.
-export function pickHint({ toGo, answered, hasOpen }) {
+// The pick-button hint: distinguishes "round finished" from "everyone benched"
+// from "room still empty" rather than keying off whether topics exist.
+// `sittingOut` counts present, unanswered people who opted out — when they're
+// the reason the pool is empty, point the host at the sit-out toggles instead
+// of claiming the room is empty or the round is over.
+export function pickHint({ toGo, answered, hasOpen, sittingOut }) {
+  if (toGo === 0 && sittingOut > 0) return "Everyone still to go is sitting out.";
   if (toGo === 0 && answered > 0) return "Everyone has had a topic.";
   if (toGo === 0) return "Add people to the room first.";
   if (!hasOpen) return "Add an open topic to pick.";

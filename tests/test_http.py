@@ -1,6 +1,7 @@
 """End-to-end tests for the HTTP handler — spin up the real server on an
 ephemeral port and hit it with urllib (no extra deps)."""
 
+import http.client
 import json
 import threading
 import urllib.error
@@ -19,15 +20,11 @@ def server():
 
     `STATE` is a module-global shared across tests, and `reset()` does NOT
     clear topics or participants (it only resets the round). So we wipe the
-    whole roster + topic set by hand under the lock for a clean slate.
+    whole meeting via the same helper the demo teardown uses.
     """
     with STATE.lock:
-        STATE.participants.clear()
-        STATE.order.clear()
-        STATE.topics.clear()
-        STATE.topic_order.clear()
-        STATE.selected_pid = None
-        STATE.active_topic_id = None
+        STATE._wipe()
+        STATE.demo = False
     srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     port = srv.server_address[1]
     t = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -286,6 +283,59 @@ class TestTopicActions:
         tid = _add_topic(server, "Topic")
         code, _ = _post(f"{server}/api/topic/{tid}/dance")
         assert code == 404
+
+
+class TestPostRouting:
+    def test_post_with_query_string_still_routes(self, server):
+        # POST routes on the path component only (same as GET), so a query
+        # string like a cache-buster can't turn a valid action into a 404.
+        _add_participant(server, "Alice")
+        code, body = _post(server + "/api/pick?ts=123")
+        assert code == 200
+        assert body["ok"] is True
+
+    def test_unread_body_does_not_desync_keep_alive(self, server):
+        # /api/reset ignores its body; the handler must still drain it, or the
+        # next request on this persistent connection is parsed from the
+        # leftover bytes and comes back garbage.
+        host = server.removeprefix("http://")
+        conn = http.client.HTTPConnection(host, timeout=5)
+        try:
+            padding = json.dumps({"padding": "x" * 256}).encode()
+            for _ in range(2):
+                conn.request(
+                    "POST",
+                    "/api/reset",
+                    body=padding,
+                    headers={"Content-Type": "application/json"},
+                )
+                resp = conn.getresponse()
+                assert resp.status == 200
+                assert json.loads(resp.read()) == {"ok": True}
+        finally:
+            conn.close()
+
+    def test_malformed_content_length_closes_the_connection(self, server):
+        # With an unparseable Content-Length the body length is unknowable, so
+        # the handler can't drain it — it must close the connection instead of
+        # letting the stray bytes desync the next keep-alive request.
+        host = server.removeprefix("http://")
+        conn = http.client.HTTPConnection(host, timeout=5)
+        try:
+            conn.putrequest("POST", "/api/reset")
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", "not-a-number")
+            conn.endheaders(message_body=b"{}")
+            resp = conn.getresponse()
+            assert resp.status == 200
+            resp.read()
+            # The server hung up; reusing the socket fails instead of parsing
+            # the leftover body bytes as a new request.
+            with pytest.raises((http.client.RemoteDisconnected, ConnectionError)):
+                conn.request("POST", "/api/reset", body=b"{}")
+                conn.getresponse()
+        finally:
+            conn.close()
 
 
 class TestSelection:

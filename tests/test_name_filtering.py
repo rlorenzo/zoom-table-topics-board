@@ -11,7 +11,7 @@ from board import (
     DEFAULT_EXCLUDE,
     HOST_DETECT,
     _filter_and_dedupe,
-    _is_chat_anchor_uia,
+    _uia_hay,
     build_exclude_re,
     clean_name,
     looks_like_name,
@@ -33,6 +33,11 @@ class TestCleanName:
             ("Alice (guest)", "Alice"),
             ("Alice (host, me)", "Alice"),
             ("Alice (cohost, me)", "Alice"),
+            # Zoom hyphenates freely; without this strip the leftover "co-host"
+            # word would match the exclude list and drop the participant.
+            ("Alice (co-host, me)", "Alice"),
+            ("Alice (Co-host, me)", "Alice"),
+            ("Alice (guest, you)", "Alice"),
             # Trailing role-word without parens is also stripped.
             ("Alice host", "Alice"),
             ("Alice cohost", "Alice"),
@@ -147,6 +152,17 @@ class TestBuildExcludeRe:
         r = build_exclude_re(["mute", "mute", "MUTE"])
         assert r.search("mute")
 
+    def test_terms_with_edge_punctuation_still_match(self):
+        # \b next to a non-word edge can never match, so boundaries are only
+        # anchored where the term's edge is a word character — a user-supplied
+        # --exclude "(external)" must actually fire.
+        r = build_exclude_re(["(external)"])
+        assert r.search("Panel label (external)")
+        assert r.search("(external)")
+        # The inner word boundary rule still holds for word-edged terms.
+        r = build_exclude_re(["mute"])
+        assert not r.search("commuter")
+
 
 class TestHostDetect:
     @pytest.mark.parametrize(
@@ -236,16 +252,24 @@ class TestChatAnchorDetection:
         # \bchat\b must match "chat" as a word, not inside "Chatterjee".
         assert not CHAT_HINT_RE.search(text)
 
+    # Chat rejection searches the same joined haystack anchor matching uses
+    # (_uia_hay), so a hint in any harvested attribute rejects the anchor.
     def test_uia_anchor_flagged_when_any_attr_mentions_chat(self):
-        assert _is_chat_anchor_uia(_FakeUIAElement(Name="Chat"))
-        assert _is_chat_anchor_uia(_FakeUIAElement(AutomationId="meeting chat"))
-        assert _is_chat_anchor_uia(_FakeUIAElement(LocalizedControlType="chat list"))
+        assert CHAT_HINT_RE.search(_uia_hay(_FakeUIAElement(Name="Chat")))
+        assert CHAT_HINT_RE.search(
+            _uia_hay(_FakeUIAElement(AutomationId="meeting chat"))
+        )
+        assert CHAT_HINT_RE.search(
+            _uia_hay(_FakeUIAElement(LocalizedControlType="chat list"))
+        )
 
     def test_uia_anchor_camelcase_id_is_not_caught(self):
         # CHAT_HINT_RE is \bchat\b, so identifier-style values with no word
         # boundary ("ChatPanel") are NOT flagged — only "chat" as a word is.
-        assert not _is_chat_anchor_uia(_FakeUIAElement(AutomationId="ChatPanel"))
+        assert not CHAT_HINT_RE.search(
+            _uia_hay(_FakeUIAElement(AutomationId="ChatPanel"))
+        )
 
     def test_uia_anchor_not_flagged_for_participant_panel(self):
         el = _FakeUIAElement(Name="Participants (3)", AutomationId="ParticipantsList")
-        assert not _is_chat_anchor_uia(el)
+        assert not CHAT_HINT_RE.search(_uia_hay(el))

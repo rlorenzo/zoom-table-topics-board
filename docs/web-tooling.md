@@ -13,20 +13,22 @@ so the JS is lintable and testable:
 | --- | --- |
 | `index.html` | Markup only; links `styles.css` and loads `app.js` as a module. |
 | `styles.css` | All styles (was the inline `<style>`). |
-| `app.js` | The browser app: DOM rendering, event wiring, SSE. Imports from `lib.js`. |
-| `lib.js` | Pure, DOM-free helpers (`escapeHtml`, `parsePaste`, `eligibleNames`, the topic-localStorage functions, `fmtTime`). No side effects on import — this is the unit-tested module. |
+| `app.js` | The browser app: DOM rendering, event wiring, SSE. Imports from `lib.js` and `engine.js`. |
+| `lib.js` | Pure, DOM-free helpers (`escapeHtml`, `parsePaste`, `eligibleNames`, the topic-localStorage functions, `fmtTime`). No side effects on import — unit-tested. |
+| `engine.js` | Browser-side, DOM-free port of `board.py`'s `State`: drives the standalone (no-server) board. Unit-tested. |
 | `lib.test.js` | Vitest unit tests for `lib.js`. |
+| `engine.test.js` | Vitest unit tests for `engine.js`, mirroring `tests/test_state.py`. |
 
-`board.py` serves `app.js`, `lib.js`, and `styles.css` as static files via an
-explicit allowlist (`STATIC_FILES`) — the path is never derived from the
-request, so there's no traversal surface.
+`board.py` serves `app.js`, `lib.js`, `engine.js`, and `styles.css` as static
+files via an explicit allowlist (`STATIC_FILES`) — the path is never derived
+from the request, so there's no traversal surface.
 
 ## Tools
 
 | Tool | Covers |
 | --- | --- |
 | [Biome](https://biomejs.dev) | JS + CSS lint **and** format (one binary). |
-| [Vitest](https://vitest.dev) + jsdom | Unit tests for `lib.js`, with v8 coverage. |
+| [Vitest](https://vitest.dev) + jsdom | Unit tests for `lib.js` and `engine.js`, with v8 coverage. |
 | [fallow](https://docs.fallow.tools) | JS dead-code + duplication (and complexity, on demand). |
 | [html-validate](https://html-validate.org) | HTML structure + accessibility. |
 
@@ -64,10 +66,11 @@ npm run check        # lint + html + test:cov + deadcode
 
 ## Coverage gate
 
-`vitest.config.js` gates `lib.js` at a floor (statements/functions/lines 90,
-branches 85). It's a regression guard, not a target — `lib.js` is fully covered
-today. `app.js` is deliberately out of scope for unit tests: it's DOM/event
-wiring, exercised by running the app, not in isolation.
+`vitest.config.js` gates `lib.js` and `engine.js` at a floor
+(statements/functions/lines 90, branches 85). It's a regression guard, not a
+target — both are fully covered today. `app.js` is deliberately out of scope
+for unit tests: it's DOM/event wiring, exercised by running the app, not in
+isolation.
 
 ## Notable config choices
 
