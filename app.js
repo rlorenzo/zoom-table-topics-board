@@ -46,19 +46,26 @@ const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)")
 // One app.js, two transports. With a backend present (uv run board.py) we POST
 // to /api/* and stream snapshots over SSE, preserving Zoom auto-read. Served
 // statically (GitHub Pages) we drive a local engine.js with no network at all.
-// The transport is chosen once at startup; every post() below delegates to it.
-let activeTransport = null;
 // The transport is chosen asynchronously at startup (we probe for a backend).
-// Until it resolves, buffer posts on this promise instead of dropping them, so
-// an early click during the probe still reaches the engine/server.
+// Until it resolves, posts buffer on this promise instead of dropping, so an
+// early click during the probe still reaches the engine/server; once resolved,
+// the same expression flushes on the next microtask.
 let markTransportReady;
 const transportReady = new Promise((resolve) => {
   markTransportReady = resolve;
 });
-function post(url, body) {
-  return activeTransport
-    ? activeTransport.post(url, body)
-    : transportReady.then((t) => t.post(url, body));
+const post = (url, body) => transportReady.then((t) => t.post(url, body));
+
+// Post and report success, so form handlers can keep the user's typed input
+// when a request fails (server restart, network drop) instead of clearing it
+// optimistically. The local transport resolves with no Response => success.
+async function postOk(url, body) {
+  try {
+    const res = await post(url, body);
+    return !res || res.ok;
+  } catch {
+    return false;
+  }
 }
 
 // ---- state cache -------------------------------------------------
@@ -157,6 +164,11 @@ function resetReveal() {
   revealActive = false;
 }
 
+// Monotonic render counter: a view transition applies its snapshot in an async
+// callback, so without this guard a newer snapshot rendered in the meantime
+// would be overwritten by the older, queued one.
+let renderSeq = 0;
+
 function render(s) {
   const prev = state;
   // Cinematic handoff: when a topic is assigned (picking -> focus), morph the
@@ -168,15 +180,27 @@ function render(s) {
     nextView(s) === "focus" &&
     typeof document.startViewTransition === "function" &&
     !reduceMotion();
-  if (morph) document.startViewTransition(() => applyRender(s, prev));
-  else applyRender(s, prev);
+  const seq = ++renderSeq;
+  if (morph) {
+    document.startViewTransition(() => {
+      if (seq === renderSeq) applyRender(s, prev);
+    });
+  } else {
+    applyRender(s, prev);
+  }
 }
+
+// True until the first snapshot lands. The boot-time placeholder state has no
+// topics, so diffing the first real snapshot against it would replay a "just
+// done" celebration for work finished long before this page load.
+let firstSnapshot = true;
 
 function applyRender(s, prev) {
   state = s;
 
   // A single topic flipping to done (host hit "Done") gets a celebration.
-  const done = newlyDoneId(prev.topics, s.topics);
+  const done = firstSnapshot ? null : newlyDoneId(prev.topics, s.topics);
+  firstSnapshot = false;
   if (done) justDoneId = done;
 
   const view = nextView(s);
@@ -197,20 +221,26 @@ function applyRender(s, prev) {
 const RENDERERS = { board: renderBoard, picking: renderPicking, focus: renderFocus };
 
 // ---- topic localStorage sync + one-time re-seed ------------------
+// The serialized form of the last set written to localStorage, so identical
+// snapshots (roster churn re-broadcasts constantly) skip the synchronous write.
+let lastSavedTopics = null;
+
 function syncTopicStorage(s) {
-  // Sample topics live only on the server. Never mirror them into the host's
-  // saved set, and don't re-seed from storage on top of a running demo —
-  // marking this load "seeded" keeps the post-exit clean slate clean too.
+  // Sample topics live only on the server: never mirror them into the host's
+  // saved set. Re-arm the seed guard so exiting the demo re-seeds the saved
+  // topics onto the emptied board instead of overwriting them with [] — a demo
+  // must never cost the host their stored topic set.
   if (s.demo) {
-    seededThisLoad = true;
+    seededThisLoad = false;
     return;
   }
 
   const serverTopics = s.topics.map((t) => ({ headline: t.headline, details: t.details || "" }));
 
   if (!seededThisLoad) {
-    // First snapshot this page load. If the server is empty, re-seed it once
-    // from whatever this browser remembered; otherwise adopt the server set.
+    // First non-demo snapshot (page load, or just after a demo). If the server
+    // is empty, re-seed it once from whatever this browser remembered;
+    // otherwise adopt the server set.
     seededThisLoad = true; // guard before the async call to avoid loops
     if (serverTopics.length === 0) {
       const stored = loadStoredTopics();
@@ -221,10 +251,14 @@ function syncTopicStorage(s) {
     }
   }
 
-  // After the initial seed, mirror the server's set on every snapshot —
+  // After the initial seed, mirror the server's set on every change —
   // INCLUDING when it becomes empty — so deleting the last topic isn't
   // resurrected from a stale cache on the next reload.
-  saveStoredTopics(serverTopics);
+  const serialized = JSON.stringify(serverTopics);
+  if (serialized !== lastSavedTopics) {
+    saveStoredTopics(serverTopics);
+    lastSavedTopics = serialized;
+  }
 }
 
 // ---- topic card markup (shared by board + picking choices) -------
@@ -322,9 +356,12 @@ function renderBoard(s) {
 
   const present = s.participants.filter((p) => p.present);
   const answered = present.filter((p) => p.answered).length;
-  // "Still to go" mirrors the server pool: present, not answered, not opted out
-  // (excluded). The host counts too — they're a full participant.
-  const toGo = present.filter((p) => !p.answered && !p.excluded).length;
+  // "Still to go" is exactly the pick-eligible pool — one predicate, shared
+  // with the shuffle reveal, so the count and the roll can never disagree.
+  const toGo = eligibleNames(s).length;
+  // Present, unanswered people who opted out: when they're why the pool is
+  // empty, the hint should say "sitting out", not "room is empty".
+  const sittingOut = present.filter((p) => !p.answered && p.excluded).length;
   const tDone = s.topics.filter((t) => t.status === "done").length;
   const tTotal = s.topics.length;
   const openCount = s.topics.filter((t) => t.status === "open").length;
@@ -354,7 +391,7 @@ function renderBoard(s) {
   if (toGo > 0 && hasOpen) {
     $("pickHint").innerHTML = `<b>${toGo}</b> still to go`;
   } else {
-    $("pickHint").textContent = pickHint({ toGo, answered, hasOpen });
+    $("pickHint").textContent = pickHint({ toGo, answered, hasOpen, sittingOut });
   }
 }
 
@@ -738,6 +775,8 @@ $("concealTopics").addEventListener("change", (e) => {
 });
 
 // ---- Add one topic -----------------------------------------------
+// Inputs clear only after the post succeeds: clearing first would destroy the
+// user's typed topic with no feedback if the request fails.
 $("singleForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const headline = $("hl").value.trim();
@@ -746,13 +785,15 @@ $("singleForm").addEventListener("submit", async (e) => {
     return;
   }
   const details = $("dt").value.trim();
+  if (!(await postOk("/api/topic", { headline, details }))) return;
   $("hl").value = "";
   $("dt").value = "";
   $("hl").focus();
-  await post("/api/topic", { headline, details });
 });
 
 // ---- Paste many ---------------------------------------------------
+// The pasted list clears only after the post succeeds (same as the single
+// form) — a failed request must not eat a whole prepared topic list.
 $("pasteForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const topics = parsePaste($("pasteBox").value);
@@ -761,10 +802,10 @@ $("pasteForm").addEventListener("submit", async (e) => {
     $("pasteBox").focus();
     return;
   }
+  if (!(await postOk("/api/topics", { topics, replace }))) return;
   $("pasteBox").value = "";
   $("pasteReplace").checked = false;
   growPaste(); // shrink back now that it's empty
-  await post("/api/topics", { topics, replace });
 });
 
 // ---- Roster: add / select / remove -------------------------------
@@ -773,8 +814,8 @@ $("rosterAddForm").addEventListener("submit", async (e) => {
   const input = $("rosterAddName");
   const name = input.value.trim();
   if (!name) return;
+  if (!(await postOk("/api/participant", { name }))) return;
   input.value = "";
-  await post("/api/participant", { name });
 });
 
 // ---- Picking: actions --------------------------------------------
@@ -900,14 +941,18 @@ function setLive(text, stale) {
 function serverTransport() {
   return {
     post(url, body) {
-      return fetch(url, {
+      // Strip the leading slash so requests resolve relative to the page, like
+      // the hasServer() probe — a board served under a subpath (reverse proxy)
+      // must not fall back to the origin root and 404 on every action.
+      return fetch(url.replace(/^\//, ""), {
         method: "POST",
         headers: body ? { "Content-Type": "application/json" } : {},
         body: body ? JSON.stringify(body) : undefined,
       });
     },
     subscribe(onSnapshot) {
-      const es = new EventSource("/events");
+      // Relative for the same reason as post() above.
+      const es = new EventSource("events");
       es.onmessage = (e) => {
         let snap;
         try {
@@ -992,6 +1037,6 @@ async function hasServer() {
 // registered synchronously already; any post() they fire before the probe
 // resolves is buffered on transportReady and flushed once we mark it ready.
 const engine = createEngine();
-activeTransport = (await hasServer()) ? serverTransport() : localTransport(engine);
-markTransportReady(activeTransport);
-activeTransport.subscribe(render);
+const transport = (await hasServer()) ? serverTransport() : localTransport(engine);
+markTransportReady(transport);
+transport.subscribe(render);

@@ -48,7 +48,10 @@
     </div>
   </header>
 
-  <main aria-live="polite">
+  <!-- No aria-live here: the whole board re-renders on every snapshot, so a
+       live region this broad would re-announce the full topic list and roster
+       on each update. The pick banner below is its own targeted live region. -->
+  <main>
     <section class="welcome" id="welcome" aria-labelledby="welcomeTitle" hidden>
       <div class="welcome-card">
         <span class="welcome-mark" aria-hidden="true">

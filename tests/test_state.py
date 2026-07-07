@@ -86,12 +86,21 @@ class TestSyncParticipants:
         assert bob["leftTime"] is None
 
     def test_manual_entries_are_not_marked_left_when_missing_from_ax(self, state):
-        # Manual entries get id prefix "m" so the AX-tracking pass leaves them.
+        # Manual entries have source "manual", so the panel-tracking pass
+        # (which only manages source "auto") leaves them alone.
         state.add_manual("Carol")
         state.sync_participants([{"name": "Alice", "is_host": False}])
         carol = _by_name(state, "Carol")
         assert carol["present"] is True
         assert carol["leftTime"] is None
+
+    def test_source_records_where_each_entry_came_from(self, state):
+        state.add_manual("Manny")
+        state.sync_participants([{"name": "Autumn", "is_host": False}])
+        assert _by_name(state, "Manny")["source"] == "manual"
+        assert _by_name(state, "Autumn")["source"] == "auto"
+        state.start_demo()
+        assert all(p["source"] == "demo" for p in state.snapshot()["participants"])
 
     def test_selected_participant_clears_when_they_leave(self, state):
         state.sync_participants(
@@ -368,6 +377,17 @@ class TestPickRandom:
         chosen = state.pick_random()
         assert state.selected_pid == chosen
 
+    def test_active_topic_holder_is_not_rolled(self, state):
+        state.add_manual("Alice")
+        state.add_manual("Bob")
+        tid = state.add_topic("T1")
+        alice = _pid_of(state, "Alice")
+        state.select_participant(alice)
+        state.assign(tid)
+        # Alice is mid-answer on an active topic; only Bob can be rolled.
+        for _ in range(20):
+            assert state.pick_random() == _pid_of(state, "Bob")
+
 
 class TestSelectParticipant:
     def test_selects_present_person(self, state):
@@ -402,6 +422,17 @@ class TestSelectParticipant:
         state.add_manual("Alice")
         pid = _pid_of(state, "Alice")
         _by_name(state, "Alice")["answered"] = True
+        assert state.select_participant(pid) is False
+        assert state.selected_pid is None
+
+    def test_active_topic_holder_cannot_be_selected_again(self, state):
+        # Someone mid-answer already has the mic: selecting them again would
+        # let a second topic be assigned to them simultaneously.
+        state.add_manual("Alice")
+        pid = _pid_of(state, "Alice")
+        tid = state.add_topic("T1")
+        state.select_participant(pid)
+        state.assign(tid)
         assert state.select_participant(pid) is False
         assert state.selected_pid is None
 
@@ -583,6 +614,19 @@ class TestReopenTopic:
         assert state.reopen_topic(tid, reselect=True) is True
         assert state.active_topic_id is None
         assert state.selected_pid == pid
+
+    def test_reopen_reselect_skips_an_excluded_assignee(self, state):
+        # If the assignee opted out after being handed the topic, the focus
+        # "Back" button must not re-select them — set_excluded promises an
+        # excluded person can never end up selected.
+        state.add_manual("Alice")
+        pid = _pid_of(state, "Alice")
+        tid = state.add_topic("Topic")
+        state.select_participant(pid)
+        state.assign(tid)
+        state.set_excluded(pid, True)
+        assert state.reopen_topic(tid, reselect=True) is True
+        assert state.selected_pid is None
 
     def test_reopen_without_reselect_leaves_selection_cleared(self, state):
         state.add_manual("Alice")

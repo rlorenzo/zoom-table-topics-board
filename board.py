@@ -78,6 +78,7 @@ class Person(TypedDict):
 class Participant(TypedDict):
     id: str
     name: str
+    source: str  # "auto" (Zoom panel) | "manual" | "demo"
     joinTime: float
     leftTime: float | None
     present: bool
@@ -114,8 +115,11 @@ STATIC_FILES: dict[str, tuple[str, str]] = {
 }
 
 # --- Name cleaning / filtering --------------------------------------------
+# Any comma-separated list of role words in trailing parens: "(host)",
+# "(host, me)", "(Co-host, me)", ... — Zoom mixes hyphenation freely.
+_ROLE = r"(?:co-?host|host|me|guest|you)"
 ANNOT = re.compile(
-    r"\s*\((?:host|co-?host|me|guest|you|host,\s*me|cohost,\s*me)\)\s*$",
+    rf"\s*\({_ROLE}(?:\s*,\s*{_ROLE})*\)\s*$",
     re.IGNORECASE,
 )
 ROLEWORD = re.compile(r"\b(host|co-?host|guest|me|you)\b\s*$", re.IGNORECASE)
@@ -180,10 +184,22 @@ DEFAULT_EXCLUDE = [
 ]
 
 
+def _term_pattern(term: str) -> str:
+    """Escape one exclude term, anchoring with \\b only where the term's edge
+    is a word character — \\b before "(" or after ")" can never match, which
+    would silently disable a user-supplied term like "(external)"."""
+    pat = re.escape(term)
+    if re.match(r"\w", term):
+        pat = r"\b" + pat
+    if re.search(r"\w\Z", term):
+        pat += r"\b"
+    return pat
+
+
 def build_exclude_re(terms: Iterable[str]) -> re.Pattern[str]:
     ordered = sorted(set(terms), key=len, reverse=True)
     return re.compile(
-        r"\b(?:" + "|".join(re.escape(t) for t in ordered) + r")\b",
+        "(?:" + "|".join(_term_pattern(t) for t in ordered) + ")",
         re.IGNORECASE,
     )
 
@@ -236,66 +252,62 @@ def _node_text(el: Any) -> str:
     return ""
 
 
-def _is_chat_anchor_ax(el: Any) -> bool:
-    # Match the same attribute set _collect_anchors builds `hay` from, so a
-    # "chat" hint in AXDescription/AXHelp also rejects the anchor.
-    for a in (
-        "AXTitle",
-        "AXDescription",
-        "AXRoleDescription",
-        "AXHelp",
-        "AXIdentifier",
-    ):
-        v = _attr(el, a)
-        if v and CHAT_HINT_RE.search(str(v)):
+# The text-ish AX attributes anchor matching reads. Chat rejection searches the
+# same joined haystack, so the two can never drift apart.
+AX_HAY_ATTRS = (
+    "AXTitle",
+    "AXDescription",
+    "AXRoleDescription",
+    "AXHelp",
+    "AXIdentifier",
+)
+
+
+def _walk(
+    el: Any,
+    children_of: Callable[[Any], Iterable[Any]],
+    visit: Callable[[Any], bool],
+    max_nodes: int,
+    depth: int = 0,
+    counter: list[int] | None = None,
+) -> None:
+    """Depth- and size-guarded DFS shared by the anchor and text collectors on
+    both accessibility backends. `visit` returns True to prune descent below
+    `el` (an anchor was found, or the node went invalid mid-traversal)."""
+    counter = counter or [0]
+    if counter[0] >= max_nodes or depth > 40:
+        return
+    counter[0] += 1
+    if visit(el):
+        return
+    for c in children_of(el):
+        _walk(c, children_of, visit, max_nodes, depth + 1, counter)
+
+
+def _ax_children(el: Any) -> Iterable[Any]:
+    return _attr(el, "AXChildren") or []
+
+
+def _collect_anchors(el: Any, pat: re.Pattern[str], found: list[Any]) -> None:
+    def visit(node: Any) -> bool:
+        hay = " ".join(str(_attr(node, a) or "") for a in AX_HAY_ATTRS)
+        if pat.search(hay) and not CHAT_HINT_RE.search(hay):
+            found.append(node)
             return True
-    return False
+        return False
+
+    _walk(el, _ax_children, visit, 8000)
 
 
-def _collect_anchors(
-    el: Any,
-    pat: re.Pattern[str],
-    found: list[Any],
-    depth: int = 0,
-    counter: list[int] | None = None,
-) -> None:
-    counter = counter or [0]
-    if counter[0] >= 8000 or depth > 40:
-        return
-    counter[0] += 1
-    hay = " ".join(
-        str(_attr(el, a) or "")
-        for a in (
-            "AXTitle",
-            "AXDescription",
-            "AXRoleDescription",
-            "AXHelp",
-            "AXIdentifier",
-        )
-    )
-    if pat.search(hay) and not _is_chat_anchor_ax(el):
-        found.append(el)
-        return
-    for c in _attr(el, "AXChildren") or []:
-        _collect_anchors(c, pat, found, depth + 1, counter)
+def _collect_texts(el: Any, out: list[str]) -> None:
+    def visit(node: Any) -> bool:
+        if _attr(node, "AXRole") in TEXT_ROLES:
+            t = _node_text(node)
+            if t:
+                out.append(t)
+        return False
 
-
-def _collect_texts(
-    el: Any,
-    out: list[str],
-    depth: int = 0,
-    counter: list[int] | None = None,
-) -> None:
-    counter = counter or [0]
-    if counter[0] >= 6000 or depth > 40:
-        return
-    counter[0] += 1
-    if _attr(el, "AXRole") in TEXT_ROLES:
-        t = _node_text(el)
-        if t:
-            out.append(t)
-    for c in _attr(el, "AXChildren") or []:
-        _collect_texts(c, out, depth + 1, counter)
+    _walk(el, _ax_children, visit, 6000)
 
 
 def _filter_and_dedupe(
@@ -384,16 +396,6 @@ def _uia_node_text(el: Any) -> str:
     return ""
 
 
-def _is_chat_anchor_uia(el: Any) -> bool:
-    # Match the same attribute set _uia_collect_anchors builds `hay` from, so a
-    # "chat" hint in HelpText also rejects the anchor.
-    for a in ("Name", "LocalizedControlType", "AutomationId", "HelpText"):
-        v = getattr(el, a, None)
-        if v and CHAT_HINT_RE.search(str(v)):
-            return True
-    return False
-
-
 def _uia_hay(el: Any) -> str | None:
     """Join an element's text-ish UIA properties for anchor matching. Returns
     None if a COM error fires — the element was invalidated mid-traversal
@@ -407,56 +409,39 @@ def _uia_hay(el: Any) -> str | None:
         return None
 
 
-def _uia_collect_anchors(
-    el: Any,
-    pat: re.Pattern[str],
-    found: list[Any],
-    depth: int = 0,
-    counter: list[int] | None = None,
-) -> None:
-    counter = counter or [0]
-    if counter[0] >= 8000 or depth > 40:
-        return
-    counter[0] += 1
-    hay = _uia_hay(el)
-    if hay is None:
-        return
-    if pat.search(hay) and not _is_chat_anchor_uia(el):
-        found.append(el)
-        return
+def _uia_children(el: Any) -> list[Any]:
     try:
-        children = el.GetChildren()
+        return list(el.GetChildren())
     except Exception:
-        return
-    for c in children:
-        _uia_collect_anchors(c, pat, found, depth + 1, counter)
+        return []
 
 
-def _uia_collect_texts(
-    el: Any,
-    out: list[str],
-    depth: int = 0,
-    counter: list[int] | None = None,
-) -> None:
-    counter = counter or [0]
-    if counter[0] >= 6000 or depth > 40:
-        return
-    counter[0] += 1
-    try:
-        ctrl_type = getattr(el, "ControlTypeName", "") or ""
-        if ctrl_type in UIA_TEXT_TYPES:
-            t = _uia_node_text(el)
-            if t:
-                out.append(t)
-    except Exception:
-        # Invalidated UIA/COM node mid-traversal — skip it, keep going.
-        return
-    try:
-        children = el.GetChildren()
-    except Exception:
-        return
-    for c in children:
-        _uia_collect_texts(c, out, depth + 1, counter)
+def _uia_collect_anchors(el: Any, pat: re.Pattern[str], found: list[Any]) -> None:
+    def visit(node: Any) -> bool:
+        hay = _uia_hay(node)
+        if hay is None:
+            return True  # invalidated mid-traversal: skip this subtree
+        if pat.search(hay) and not CHAT_HINT_RE.search(hay):
+            found.append(node)
+            return True
+        return False
+
+    _walk(el, _uia_children, visit, 8000)
+
+
+def _uia_collect_texts(el: Any, out: list[str]) -> None:
+    def visit(node: Any) -> bool:
+        try:
+            if (getattr(node, "ControlTypeName", "") or "") in UIA_TEXT_TYPES:
+                t = _uia_node_text(node)
+                if t:
+                    out.append(t)
+        except Exception:
+            # Invalidated UIA/COM node mid-traversal — skip this subtree.
+            return True
+        return False
+
+    _walk(el, _uia_children, visit, 6000)
 
 
 def _read_zoom_participants_uia(
@@ -563,8 +548,11 @@ class State:
         return f"t{self._topic_seq}"
 
     # --- participant bookkeeping (shared with the icebreaker engine) -------
-    def _upsert(self, pid: str, name: str) -> bool:
-        """Insert or refresh a participant. Order is appended to on first sight."""
+    def _upsert(self, pid: str, name: str, source: str) -> bool:
+        """Insert or refresh a participant. Order is appended to on first sight.
+        `source` records where the entry came from ("auto" | "manual" | "demo")
+        so e.g. only auto-read people are marked left when the panel loses them.
+        """
         p = self.participants.get(pid)
         if p:
             changed = bool(
@@ -580,6 +568,7 @@ class State:
         self.participants[pid] = {
             "id": pid,
             "name": name or "Guest",
+            "source": source,
             "joinTime": time.time() * 1000,
             "leftTime": None,
             "present": True,
@@ -612,10 +601,11 @@ class State:
         return changed
 
     def _mark_missing_as_left(self, seen_pids: set[str], now: float) -> bool:
-        """Mark AX-tracked participants no longer in the panel as left."""
+        """Mark auto-read participants no longer in the panel as left. Manual
+        and demo entries are never panel-tracked, so they're left alone."""
         changed = False
         for pid, p in self.participants.items():
-            if pid.startswith("a") and pid not in seen_pids and p["present"]:
+            if p["source"] == "auto" and pid not in seen_pids and p["present"]:
                 p["present"] = False
                 p["leftTime"] = now
                 # A rolled-but-unassigned speaker who leaves the call shouldn't
@@ -646,8 +636,9 @@ class State:
             by_id = {pid: dict(p) for pid, p in self.participants.items()}
             ordered = [by_id[pid] for pid in self.order if pid in by_id]
             # Defensive: include any participant not in order at the end.
+            order_set = set(self.order)
             for pid, p in by_id.items():
-                if pid not in self.order:
+                if pid not in order_set:
                     ordered.append(p)
             topics = [
                 self._topic_view(self.topics[tid])
@@ -681,7 +672,7 @@ class State:
     # --- participant mutations --------------------------------------------
     def add_manual(self, name: str) -> None:
         with self.lock:
-            self._upsert(self._id("m", name + str(time.time())), name)
+            self._upsert(self._id("m", name + str(time.time())), name, "manual")
         self.broadcast()
 
     def _upsert_seen(
@@ -700,7 +691,7 @@ class State:
             seen.add(pid)
             if entry.get("is_host"):
                 host_pid = pid
-            if self._upsert(pid, nm):
+            if self._upsert(pid, nm, "auto"):
                 changed = True
         return host_pid, changed
 
@@ -826,16 +817,26 @@ class State:
         return True
 
     # --- selection & assignment -------------------------------------------
+    def _holds_active_topic(self, pid: str) -> bool:
+        """True while `pid` is the assignee of an in-progress (active) topic:
+        they already have the mic, so rolling or selecting them again would
+        hand one person two simultaneous topics."""
+        return any(
+            t["assignee"] == pid and t["status"] == "active"
+            for t in self.topics.values()
+        )
+
     def _eligible_pool(self, exclude_pid: str | None) -> list[str]:
         """Participants who can be rolled: present, not yet answered, not opted
-        out (excluded), and not the just-excluded person from a 'pick someone
-        else'. The host is a full participant and is rolled like anyone else."""
+        out (excluded), not already speaking on an active topic, and not the
+        just-excluded person from a 'pick someone else'. The host is a full
+        participant and is rolled like anyone else."""
         pool = []
         for pid in self.order:
             p = self.participants.get(pid)
             if not p or not p["present"] or p["answered"] or p["excluded"]:
                 continue
-            if pid == exclude_pid:
+            if pid == exclude_pid or self._holds_active_topic(pid):
                 continue
             pool.append(pid)
         return pool
@@ -852,8 +853,7 @@ class State:
                 self.selected_pid = None
                 chosen = None
             else:
-                random.shuffle(pool)  # not used cryptographically
-                chosen = pool[0]
+                chosen = random.choice(pool)  # nosec B311 — not cryptographic
                 self.selected_pid = chosen
         self.broadcast()
         return chosen
@@ -862,10 +862,13 @@ class State:
         """Manually select a specific present participant (the host included,
         since they're skipped by the random roll) so the host can hand
         themselves — or anyone — a topic. Someone who already had their turn
-        this round is rejected, the same one-turn rule the random roll uses."""
+        this round is rejected, the same one-turn rule the random roll uses.
+        So is someone currently speaking on an active topic."""
         with self.lock:
             p = self.participants.get(pid)
             if not p or not p["present"] or p["answered"] or p["excluded"]:
+                return False
+            if self._holds_active_topic(pid):
                 return False
             self.selected_pid = pid
         self.broadcast()
@@ -948,7 +951,9 @@ class State:
                 self.active_topic_id = None
             if reselect and aid:
                 ap = self.participants.get(aid)
-                if ap is not None and ap["present"]:
+                # Never re-select someone who opted out after being assigned —
+                # set_excluded promises they can't end up selected.
+                if ap is not None and ap["present"] and not ap["excluded"]:
                     self.selected_pid = aid
         self.broadcast()
         return True
@@ -984,25 +989,14 @@ class State:
 
         Replaces whatever is loaded with a fixed set of sample people and
         prompts and flips on the demo flag (which parks the Zoom reader).
-        Demo participants get a 'd' id prefix so they're never confused with
-        auto-read ('a') or manual ('m') entries.
         """
         with self.lock:
             self._wipe()
             self.demo = True
             for i, (name, is_host) in enumerate(DEMO_PARTICIPANTS):
                 pid = f"d{i}"
-                self.participants[pid] = {
-                    "id": pid,
-                    "name": name,
-                    "joinTime": time.time() * 1000,
-                    "leftTime": None,
-                    "present": True,
-                    "answered": False,
-                    "is_host": is_host,
-                    "excluded": False,
-                }
-                self.order.append(pid)
+                self._upsert(pid, name, "demo")
+                self.participants[pid]["is_host"] = is_host
             for t in DEMO_TOPICS:
                 self._make_topic(t["headline"], t.get("details", ""))
         self.broadcast()
@@ -1020,6 +1014,22 @@ STATE = State()
 
 
 # --- HTTP + SSE ------------------------------------------------------------
+# In-memory cache of static assets, keyed by path and invalidated on mtime so a
+# live edit during development still shows up. Saves a disk read per request.
+_STATIC_CACHE: dict[str, tuple[float, bytes]] = {}
+
+
+def _read_static(path: str) -> bytes:
+    mtime = os.stat(path).st_mtime
+    cached = _STATIC_CACHE.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    with open(path, "rb") as f:
+        body = f.read()
+    _STATIC_CACHE[path] = (mtime, body)
+    return body
+
+
 class QuietHTTPServer(ThreadingHTTPServer):
     """ThreadingHTTPServer that ignores benign client-disconnect errors.
 
@@ -1047,6 +1057,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # Bound after the class body (handlers must exist as attributes first).
     _STATIC_POST: ClassVar[dict[str, Callable[[Handler], None]]]
+    # The current POST's body, drained once by do_POST before dispatch.
+    _body: bytes = b""
 
     def log_message(self, format: str, *args: Any) -> None:
         pass  # quiet
@@ -1059,15 +1071,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json(self) -> dict[str, Any]:
+    def _drain_body(self) -> bytes:
+        """Read the request body exactly once, for every POST route. Leaving a
+        body unread would desync the next request on a keep-alive socket, so
+        this runs up front in do_POST — handlers parse the stash via _read_json.
+        """
         try:
             n = int(self.headers.get("Content-Length", 0))
-            if n > 1024 * 1024:  # 1MB limit
-                # Body is left unread; close the connection so the unconsumed
-                # bytes can't desync the next request on this keep-alive socket.
-                self.close_connection = True
-                return {}
-            data = json.loads(self.rfile.read(n) or b"{}")
+        except ValueError:
+            return b""
+        if n <= 0:
+            return b""
+        if n > 1024 * 1024:  # 1MB limit
+            # Body is left unread; close the connection so the unconsumed
+            # bytes can't desync the next request on this keep-alive socket.
+            self.close_connection = True
+            return b""
+        return self.rfile.read(n)
+
+    def _read_json(self) -> dict[str, Any]:
+        try:
+            data = json.loads(self._body or b"{}")
             return data if isinstance(data, dict) else {}
         except Exception:
             return {}
@@ -1084,8 +1108,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_file(self, path: str, ctype: str, missing: tuple[int, str]) -> None:
         try:
-            with open(path, "rb") as f:
-                body = f.read()
+            body = _read_static(path)
         except FileNotFoundError:
             return self._json(missing[0], {"error": missing[1]})
         self.send_response(200)
@@ -1141,15 +1164,22 @@ class Handler(BaseHTTPRequestHandler):
     PARTICIPANT_ROUTE = re.compile(r"^/api/participant/([^/]+)/(host|remove|exclude)$")
 
     def do_POST(self) -> None:
+        # Drain the body up front so every route — including 403/404 responses
+        # and handlers that ignore their body — leaves the keep-alive socket
+        # positioned at the next request.
+        self._body = self._drain_body()
         if not self._origin_ok():
             return self._json(403, {"error": "cross-origin request rejected"})
-        handler = self._STATIC_POST.get(self.path)
+        # Route on the path component only, same as do_GET, so a query string
+        # (e.g. a cache-buster) can't turn a valid action into a 404.
+        path = urlparse(self.path).path
+        handler = self._STATIC_POST.get(path)
         if handler:
             return handler(self)
-        m = self.TOPIC_ROUTE.match(self.path)
+        m = self.TOPIC_ROUTE.match(path)
         if m:
             return self._topic_action(m.group(1), m.group(2))
-        m = self.PARTICIPANT_ROUTE.match(self.path)
+        m = self.PARTICIPANT_ROUTE.match(path)
         if m:
             return self._participant_action(m.group(1), m.group(2))
         self._json(404, {"error": "not found"})
@@ -1199,8 +1229,6 @@ class Handler(BaseHTTPRequestHandler):
         elif action == "done":
             ok = STATE.mark_done(tid)
         elif action == "reopen":
-            # Read the body even though only the focus "Back" sends one, so an
-            # unconsumed payload can't desync the next keep-alive request.
             body = self._read_json()
             ok = STATE.reopen_topic(tid, reselect=bool(body.get("reselect", False)))
         else:  # assign

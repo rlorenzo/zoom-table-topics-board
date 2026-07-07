@@ -44,9 +44,11 @@ const DEMO_TOPICS = [
 
 export function createEngine() {
   // --- internal state (mirrors State.__init__) -------------------------
+  // Unlike board.py there is no separate `order` list: the server needs one
+  // because it re-pins the host to the front, but this engine never reorders,
+  // so the participants Map's insertion order IS the display order.
   let startedAt = Date.now();
-  const participants = new Map(); // id -> participant record
-  let order = []; // participant ids in display order
+  const participants = new Map(); // id -> participant record, in display order
   const topics = new Map(); // id -> topic record
   let topicOrder = []; // topic ids in display order
   let selectedPid = null; // rolled person awaiting a topic
@@ -91,14 +93,7 @@ export function createEngine() {
   // caller mutating what it gets back can never corrupt engine state.
   function snapshot() {
     const ordered = [];
-    for (const pid of order) {
-      const p = participants.get(pid);
-      if (p) ordered.push({ ...p });
-    }
-    // Defensive: include any participant somehow not in order at the end.
-    for (const [pid, p] of participants) {
-      if (!order.includes(pid)) ordered.push({ ...p });
-    }
+    for (const p of participants.values()) ordered.push({ ...p });
     const topicSnaps = [];
     for (const tid of topicOrder) {
       if (topics.has(tid)) topicSnaps.push(topicView(topics.get(tid)));
@@ -119,9 +114,11 @@ export function createEngine() {
   }
 
   // --- subscription / notify ------------------------------------------
+  // Each listener gets its own snapshot: sharing one object would let a
+  // listener that mutates what it received corrupt what later listeners see,
+  // breaking the fully-detached guarantee snapshot() makes.
   function notify() {
-    const snap = snapshot();
-    for (const fn of listeners) fn(snap);
+    for (const fn of listeners) fn(snapshot());
   }
 
   // Register a listener. Like the SSE server pushing current state on connect,
@@ -135,21 +132,26 @@ export function createEngine() {
   }
 
   // --- participant mutations ------------------------------------------
-  function addParticipant(name) {
-    const nm = String(name || "").trim();
-    if (!nm) return;
-    const pid = newManualId();
+  // The one place a participant record is built, so the demo seed and manual
+  // adds can never drift apart in shape (mirrors board.py's _upsert).
+  function makeParticipant(pid, name, { isHost = false, source = "manual" } = {}) {
     participants.set(pid, {
       id: pid,
-      name: nm,
+      name,
+      source, // "manual" | "demo" — the server adds "auto" (Zoom panel)
       joinTime: Date.now(),
       leftTime: null,
       present: true,
       answered: false,
-      is_host: false,
+      is_host: isHost,
       excluded: false,
     });
-    order.push(pid);
+  }
+
+  function addParticipant(name) {
+    const nm = String(name || "").trim();
+    if (!nm) return;
+    makeParticipant(newManualId(), nm);
     notify();
   }
 
@@ -157,7 +159,6 @@ export function createEngine() {
   // still broadcasts the (unchanged) snapshot.
   function removeParticipant(pid) {
     participants.delete(pid);
-    order = order.filter((id) => id !== pid);
     if (selectedPid === pid) selectedPid = null;
     // Free any in-progress topic this person held: an active topic can't keep a
     // removed assignee. Completed (done) topics stay done so tidying the roster
@@ -206,7 +207,10 @@ export function createEngine() {
       // client doesn't strand on the picking view with 0 topics.
       selectedPid = null;
     }
-    for (const raw of items || []) {
+    // A non-array payload (e.g. an imported object) must not throw here: with
+    // replace=true the wipe already happened, and bailing before notify()
+    // would leave every subscriber rendering a stale pre-wipe snapshot.
+    for (const raw of Array.isArray(items) ? items : []) {
       const it = raw && typeof raw === "object" ? raw : {};
       const h = String(it.headline || "").trim();
       if (!h) continue;
@@ -238,16 +242,26 @@ export function createEngine() {
   }
 
   // --- selection & assignment -----------------------------------------
+  // True while `pid` is the assignee of an in-progress (active) topic: they
+  // already have the mic, so rolling or selecting them again would hand one
+  // person two simultaneous topics.
+  function holdsActiveTopic(pid) {
+    for (const t of topics.values()) {
+      if (t.assignee === pid && t.status === "active") return true;
+    }
+    return false;
+  }
+
   // Participants who can be rolled: present, not yet answered, not opted out
-  // (excluded), and not the just-excluded person from a "pick someone else".
-  // The host is a full participant and is rolled like anyone else.
+  // (excluded), not already speaking on an active topic, and not the
+  // just-excluded person from a "pick someone else". The host is a full
+  // participant and is rolled like anyone else.
   function eligiblePool(excludePid) {
     const pool = [];
-    for (const pid of order) {
-      const p = participants.get(pid);
-      if (!p?.present || p.answered || p.excluded) continue;
-      if (pid === excludePid) continue;
-      pool.push(pid);
+    for (const p of participants.values()) {
+      if (!p.present || p.answered || p.excluded) continue;
+      if (p.id === excludePid || holdsActiveTopic(p.id)) continue;
+      pool.push(p.id);
     }
     return pool;
   }
@@ -275,10 +289,11 @@ export function createEngine() {
   // Manually select a specific present participant (the host included, since
   // they're skipped by the random roll) so the host can hand themselves, or
   // anyone, a topic. Someone who already had their turn this round is rejected,
-  // the same one-turn rule the random roll uses.
+  // the same one-turn rule the random roll uses. So is someone currently
+  // speaking on an active topic.
   function select(pid) {
     const p = participants.get(pid);
-    if (!p?.present || p.answered || p.excluded) return false;
+    if (!p?.present || p.answered || p.excluded || holdsActiveTopic(pid)) return false;
     selectedPid = pid;
     notify();
     return true;
@@ -352,7 +367,10 @@ export function createEngine() {
     t.assignee = null;
     t.status = "open";
     if (activeTopicId === tid) activeTopicId = null;
-    if (reselect && aid && participants.get(aid)?.present) selectedPid = aid;
+    // Never re-select someone who opted out after being assigned —
+    // setExcluded promises they can't end up selected.
+    const ap = reselect && aid ? participants.get(aid) : null;
+    if (ap?.present && !ap.excluded) selectedPid = aid;
     notify();
     return true;
   }
@@ -375,7 +393,6 @@ export function createEngine() {
   // Clear the whole meeting: roster, topics, and any in-flight round.
   function wipe() {
     participants.clear();
-    order = [];
     topics.clear();
     topicOrder = [];
     selectedPid = null;
@@ -391,18 +408,7 @@ export function createEngine() {
     wipe();
     demo = true;
     DEMO_PARTICIPANTS.forEach(([name, isHost], i) => {
-      const pid = `d${i}`;
-      participants.set(pid, {
-        id: pid,
-        name,
-        joinTime: Date.now(),
-        leftTime: null,
-        present: true,
-        answered: false,
-        is_host: isHost,
-        excluded: false,
-      });
-      order.push(pid);
+      makeParticipant(`d${i}`, name, { isHost, source: "demo" });
     });
     for (const t of DEMO_TOPICS) makeTopic(t.headline, t.details || "");
     notify();
