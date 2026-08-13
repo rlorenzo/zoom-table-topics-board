@@ -4,8 +4,11 @@ These helpers are vendored unchanged from the sibling `zoom-icebreaker`
 project, so the cases mirror that project's `test_name_filtering.py`.
 """
 
+import argparse
+
 import pytest
 
+import board
 from board import (
     CHAT_HINT_RE,
     DEFAULT_EXCLUDE,
@@ -38,6 +41,16 @@ class TestCleanName:
             ("Alice (co-host, me)", "Alice"),
             ("Alice (Co-host, me)", "Alice"),
             ("Alice (guest, you)", "Alice"),
+            # Webinar roles. These MUST be stripped: "panelist" is itself an
+            # entry in DEFAULT_EXCLUDE, so a leftover "(Panelist)" makes
+            # looks_like_name drop the attendee from the roster entirely.
+            ("Alice (Panelist)", "Alice"),
+            ("Alice (panelist)", "Alice"),
+            ("Alice (Attendee)", "Alice"),
+            ("Alice (Co-host, Panelist)", "Alice"),
+            ("Alice (Host, Attendee)", "Alice"),
+            # Zoom pads inconsistently between versions.
+            ("Alice ( host )", "Alice"),
             # Trailing role-word without parens is also stripped.
             ("Alice host", "Alice"),
             ("Alice cohost", "Alice"),
@@ -46,6 +59,20 @@ class TestCleanName:
     )
     def test_strips_role_annotations(self, raw, expected):
         assert clean_name(raw) == expected
+
+    @pytest.mark.parametrize(
+        "raw", ["Ann (he/him)", "Ann (she/her)", "Ann (they/them)"]
+    )
+    def test_preserves_pronouns(self, raw):
+        # Pronouns contain no role word, so the annotation regex must leave
+        # them alone — they are part of how someone chose to be addressed.
+        assert clean_name(raw) == raw
+
+    def test_webinar_panelist_survives_the_exclude_list(self):
+        # Regression: the end-to-end path that silently emptied the roster in
+        # a webinar. Strip must happen before looks_like_name sees the name.
+        exclude_re = build_exclude_re(DEFAULT_EXCLUDE)
+        assert looks_like_name(clean_name("Alice (Panelist)"), exclude_re, 2)
 
     def test_preserves_internal_role_words(self):
         # Only trailing role words are stripped.
@@ -273,3 +300,181 @@ class TestChatAnchorDetection:
     def test_uia_anchor_not_flagged_for_participant_panel(self):
         el = _FakeUIAElement(Name="Participants (3)", AutomationId="ParticipantsList")
         assert not CHAT_HINT_RE.search(_uia_hay(el))
+
+
+def _ax_node(role="AXGroup", text=None, identifier=None, children=()):
+    """A fake AX element as a plain attribute dict (see `_fake_attr`)."""
+    return {
+        "AXRole": role,
+        "AXValue": text,
+        "AXIdentifier": identifier,
+        "AXChildren": list(children),
+    }
+
+
+def _fake_attr(el, name):
+    return el.get(name)
+
+
+class TestCollectTextsPruning:
+    """`_collect_texts` must skip the panel's non-participant rows.
+
+    Zoom's participants panel lists people who were invited but never joined
+    under a "Not joined (N)" header, each with their RSVP as a child node. A
+    flat harvest turns those into roster entries, and because the board picks
+    a speaker at random it can then spotlight someone who is not in the
+    meeting -- or "Accepted".
+    """
+
+    @pytest.fixture
+    def patched(self, monkeypatch):
+        monkeypatch.setattr(board, "_attr", _fake_attr)
+
+    def test_harvests_joined_participants(self, patched):
+        tree = _ax_node(
+            children=[
+                _ax_node(
+                    role="AXCell",
+                    identifier="ZMHCTableItemType_PANELIST",
+                    children=[_ax_node(role="AXStaticText", text="Alice")],
+                )
+            ]
+        )
+        out = []
+        board._collect_texts(tree, out)
+        assert "Alice" in out
+
+    @pytest.mark.parametrize(
+        "identifier,label,child",
+        [
+            ("ZMHCTableItemType_Invitee", "Emmanuel Arinze", "Accepted"),
+            ("ZMHCTableItemType_Invitee_Group", "Not joined (1)", "Declined"),
+            ("ZMHCTableItemType_PANELIST_Group", "Joined (2)", "Awaiting response"),
+        ],
+    )
+    def test_prunes_non_participant_rows(self, patched, identifier, label, child):
+        tree = _ax_node(
+            children=[
+                _ax_node(
+                    role="AXCell",
+                    text=label,
+                    identifier=identifier,
+                    children=[_ax_node(role="AXStaticText", text=child)],
+                )
+            ]
+        )
+        out = []
+        board._collect_texts(tree, out)
+        # Pruned, not merely skipped: the RSVP hangs BELOW the row, so
+        # descending into it would harvest the child anyway.
+        assert out == []
+
+    def test_unknown_identifier_still_harvested(self, patched):
+        # If Zoom renames these ids the reader must degrade to its old
+        # behaviour rather than silently reporting an empty meeting.
+        tree = _ax_node(role="AXStaticText", text="Alice", identifier="SomethingNew")
+        out = []
+        board._collect_texts(tree, out)
+        assert out == ["Alice"]
+
+
+class TestNoAnchorMeansNoParticipants:
+    """With no participants panel, harvesting the whole app scrapes Zoom's own
+    chrome -- every toolbar button is an AXButton with a description, and
+    AXButton is a text role. Verified against a live Zoom: 10 real people
+    became 58 entries including "Giphy", "Send", "History" and "Upgrade".
+    """
+
+    @pytest.fixture
+    def args(self):
+        return argparse.Namespace(
+            bundle="us.zoom.xos",
+            anchor_regex="participant",
+            min_len=2,
+            debug=False,
+            exclude="",
+        )
+
+    @pytest.fixture
+    def exclude_re(self):
+        return build_exclude_re(DEFAULT_EXCLUDE)
+
+    def test_ax_reader_reports_none_without_an_anchor(
+        self, monkeypatch, args, exclude_re
+    ):
+        monkeypatch.setattr(board, "_find_pid", lambda _b: 123)
+        monkeypatch.setattr(
+            board, "AXUIElementCreateApplication", lambda _p: "app", raising=False
+        )
+        monkeypatch.setattr(board, "_collect_anchors", lambda *_a: None)
+        monkeypatch.setattr(
+            board,
+            "_collect_texts",
+            lambda *_a: pytest.fail("must not harvest without an anchor"),
+        )
+        assert board._read_zoom_participants_ax(args, exclude_re) == []
+
+    def test_ax_reader_returns_none_when_zoom_is_not_running(
+        self, monkeypatch, args, exclude_re
+    ):
+        # Distinct from []: "Zoom isn't running" must not be confused with
+        # "Zoom is up but the panel is hidden".
+        monkeypatch.setattr(board, "_find_pid", lambda _b: None)
+        assert board._read_zoom_participants_ax(args, exclude_re) is None
+
+    def test_ax_reader_harvests_only_the_anchored_subtrees(
+        self, monkeypatch, args, exclude_re
+    ):
+        harvested = []
+        monkeypatch.setattr(board, "_find_pid", lambda _b: 123)
+        monkeypatch.setattr(
+            board, "AXUIElementCreateApplication", lambda _p: "app", raising=False
+        )
+        monkeypatch.setattr(
+            board, "_collect_anchors", lambda _el, _p, found: found.append("panel")
+        )
+
+        def fake_texts(root, out):
+            harvested.append(root)
+            out.append("Alice")
+
+        monkeypatch.setattr(board, "_collect_texts", fake_texts)
+        people = board._read_zoom_participants_ax(args, exclude_re)
+        assert harvested == ["panel"]  # the anchor, never the app root
+        assert [p["name"] for p in people] == ["Alice"]
+
+    def test_uia_reader_reports_none_without_an_anchor(
+        self, monkeypatch, args, exclude_re
+    ):
+        monkeypatch.setattr(board, "_uia_zoom_windows", lambda: ["win"])
+        monkeypatch.setattr(board, "_uia_collect_anchors", lambda *_a: None)
+        monkeypatch.setattr(
+            board,
+            "_uia_collect_texts",
+            lambda *_a: pytest.fail("must not harvest without an anchor"),
+        )
+        assert board._read_zoom_participants_uia(args, exclude_re) == []
+
+    def test_uia_reader_harvests_only_the_anchored_subtrees(
+        self, monkeypatch, args, exclude_re
+    ):
+        harvested = []
+        monkeypatch.setattr(board, "_uia_zoom_windows", lambda: ["win"])
+        monkeypatch.setattr(
+            board, "_uia_collect_anchors", lambda _el, _p, found: found.append("panel")
+        )
+
+        def fake_texts(root, out):
+            harvested.append(root)
+            out.append("Alice")
+
+        monkeypatch.setattr(board, "_uia_collect_texts", fake_texts)
+        people = board._read_zoom_participants_uia(args, exclude_re)
+        assert harvested == ["panel"]  # the anchor, never the window root
+        assert [p["name"] for p in people] == ["Alice"]
+
+    def test_uia_reader_returns_none_when_zoom_is_not_running(
+        self, monkeypatch, args, exclude_re
+    ):
+        monkeypatch.setattr(board, "_uia_zoom_windows", lambda: [])
+        assert board._read_zoom_participants_uia(args, exclude_re) is None

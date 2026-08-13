@@ -13,6 +13,7 @@ Table Topic. No Node, no browser automation, no Zoom credentials.
     python3 board.py --port 3000
     python3 board.py --anchor-regex 'participants|attendees'
     python3 board.py --exclude "pin,spotlight" --debug
+    python3 board.py --no-resume     # never offer to restore an interrupted run
 
 Then open http://localhost:3000 and screen-share that browser tab.
 
@@ -29,12 +30,12 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import hashlib
 import json
 import os
 import queue
 import random
 import re
+import signal
 import sys
 import threading
 import time
@@ -117,9 +118,15 @@ STATIC_FILES: dict[str, tuple[str, str]] = {
 # --- Name cleaning / filtering --------------------------------------------
 # Any comma-separated list of role words in trailing parens: "(host)",
 # "(host, me)", "(Co-host, me)", ... — Zoom mixes hyphenation freely.
-_ROLE = r"(?:co-?host|host|me|guest|you)"
+#
+# Every role word Zoom can append must be listed here, because a role this
+# regex fails to strip is not merely cosmetic: the leftover "(Panelist)" then
+# matches the "panelist" entry in DEFAULT_EXCLUDE and looks_like_name drops
+# that attendee from the roster entirely. Pronouns like "(he/him)" contain no
+# role word, so they never match and are preserved.
+_ROLE = r"(?:co-?host|host|me|guest|you|panelist|attendee)"
 ANNOT = re.compile(
-    rf"\s*\({_ROLE}(?:\s*,\s*{_ROLE})*\)\s*$",
+    rf"\s*\(\s*{_ROLE}(?:\s*,\s*{_ROLE})*\s*\)\s*$",
     re.IGNORECASE,
 )
 ROLEWORD = re.compile(r"\b(host|co-?host|guest|me|you)\b\s*$", re.IGNORECASE)
@@ -225,6 +232,27 @@ def looks_like_name(s: str, exclude_re: re.Pattern[str], min_len: int) -> bool:
 # --- Accessibility reading -------------------------------------------------
 TEXT_ROLES = {"AXStaticText", "AXCell", "AXButton", "AXRow", "AXTextField"}
 
+# Zoom tags every row in the participants panel with what that row *is*, which
+# is the only reliable way to tell someone in the meeting from someone merely
+# invited. The panel has two sections — "Joined (7)" and "Not joined (2)" — and
+# each invitee row carries their RSVP as a child text node, so a flattened read
+# yields "Emmanuel Arinze" immediately followed by "Accepted", both looking
+# exactly like names. The board picks its speaker at random, so that means
+# spotlighting someone who never showed up — or rolling "Accepted" as a person.
+#
+# Pruning the two `_Group` ids is only safe because they are section-header
+# rows *beside* the rows they title, not containers of them; the panel's table
+# is flat. Rows we keep are `ZMHCTableItemType_PANELIST`. If Zoom ever renames
+# these ids, pruning simply stops matching and the reader degrades to its old
+# behaviour rather than breaking; `--debug` will show the node count jump.
+SKIP_CELL_IDS = frozenset(
+    {
+        "ZMHCTableItemType_Invitee",  # a person who has NOT joined
+        "ZMHCTableItemType_Invitee_Group",  # the "Not joined (N)" header
+        "ZMHCTableItemType_PANELIST_Group",  # the "Joined (N)" header
+    }
+)
+
 # Zoom's chat panel has a recipient picker that mentions "participants",
 # so it can match the participant anchor regex. We reject anchors that
 # look like chat so the harvester doesn't slurp up chat-panel labels
@@ -301,6 +329,10 @@ def _collect_anchors(el: Any, pat: re.Pattern[str], found: list[Any]) -> None:
 
 def _collect_texts(el: Any, out: list[str]) -> None:
     def visit(node: Any) -> bool:
+        # Prune, don't just skip: an invitee's RSVP ("Accepted") hangs below
+        # the invitee row, so descending would harvest it anyway.
+        if str(_attr(node, "AXIdentifier") or "") in SKIP_CELL_IDS:
+            return True
         if _attr(node, "AXRole") in TEXT_ROLES:
             t = _node_text(node)
             if t:
@@ -349,9 +381,20 @@ def _read_zoom_participants_ax(
     pat = re.compile(args.anchor_regex, re.IGNORECASE)
     anchors: list[Any] = []
     _collect_anchors(app_el, pat, anchors)
-    roots = anchors if anchors else [app_el]
+    if not anchors:
+        # No participants panel anywhere in the tree. Harvesting the whole app
+        # instead would scrape Zoom's own chrome: every toolbar and chat-panel
+        # button ("History", "Create new", "Giphy", "Send") is an AXButton with
+        # a description, and AXButton is a text role — so the roster fills with
+        # the app's UI and the board can roll "Giphy" as the next speaker. An
+        # exclude list can never keep up with one vendor's button labels. No
+        # panel means no participants; the poller treats an empty read as
+        # "can't see the panel" and leaves the roster intact.
+        if args.debug:
+            sys.stderr.write("[ax] no participants panel found; reporting none\n")
+        return []
     raw: list[str] = []
-    for r in roots:
+    for r in anchors:
         _collect_texts(r, raw)
     if args.debug:
         sys.stderr.write(f"[ax] {len(anchors)} anchor(s), {len(raw)} raw nodes\n")
@@ -455,9 +498,14 @@ def _read_zoom_participants_uia(
     anchors: list[Any] = []
     for w in windows:
         _uia_collect_anchors(w, pat, anchors)
-    roots = anchors if anchors else windows
+    if not anchors:
+        # Same reasoning as the macOS reader: no panel means no participants,
+        # not "scrape the whole window".
+        if args.debug:
+            sys.stderr.write("[uia] no participants panel found; reporting none\n")
+        return []
     raw: list[str] = []
-    for r in roots:
+    for r in anchors:
         _uia_collect_texts(r, raw)
     if args.debug:
         sys.stderr.write(f"[uia] {len(anchors)} anchor(s), {len(raw)} raw nodes\n")
@@ -515,8 +563,30 @@ DEMO_TOPICS: list[dict[str, str]] = [
 
 
 # --- State -----------------------------------------------------------------
+# --- Session persistence (crash recovery only) -----------------------------
+# PRODUCT.md keeps the roster and matching "ephemeral to the meeting", and that
+# stays true: this file is deleted on a clean exit and ignored once stale, so
+# nothing accumulates across meetings and a normal quit leaves no trace. What it
+# recovers is the other thing entirely -- a meeting that ended *unexpectedly*.
+# Losing who has already spoken because the process died mid-round isn't
+# privacy, it's lost work, and it costs the host the one thing the board exists
+# to track. Restore always asks first, so a stale or wrong session is one
+# keypress away from being discarded rather than silently adopted.
+SESSION_FILE = os.path.join(HERE, ".board-session.json")
+SESSION_SCHEMA = 1
+# Past this, a session is assumed to belong to an earlier meeting, not this one.
+SESSION_TTL_SECONDS = 4 * 60 * 60
+
+
+def _session_tmp(path: str) -> str:
+    """The scratch file persist() renames from, unique per process."""
+    return f"{path}.{os.getpid()}.tmp"
+
+
 class State:
-    """In-memory, per-meeting state. Ephemeral: nothing is persisted server-side.
+    """In-memory, per-meeting state. Ephemeral: nothing is persisted server-side
+    except the crash-recovery session file (see SESSION_FILE), which a clean
+    exit removes.
 
     Holds the participant roster (auto-read from Zoom and/or added by hand),
     the Table Topics, the currently *selected* participant (rolled but not yet
@@ -536,12 +606,31 @@ class State:
         self.demo = False  # True while the sample meeting is loaded (try-it mode)
         self.clients: set[queue.Queue[str]] = set()  # one Queue per SSE client
         self._topic_seq = 0  # monotonic, never reused even across reset
+        self._pid_seq = 0  # ditto, for participant ids (see _new_pid)
+        # None disables persistence entirely, which is the default so tests and
+        # library use never touch the disk; main() opts the real server in.
+        self.session_path: str | None = None
+        self._persist_lock = threading.Lock()  # serialises snapshot -> replace
 
     # --- id helpers --------------------------------------------------------
-    @staticmethod
-    def _id(prefix: str, name: str) -> str:
-        h = hashlib.sha1(name.lower().encode(), usedforsecurity=False).hexdigest()[:12]
-        return prefix + h
+    def _new_pid(self, prefix: str) -> str:
+        """Mint a fresh participant id ("a" auto-read, "m" typed in by hand).
+
+        Deliberately NOT derived from the name. Zoom's panel is only a list of
+        display names, so hashing the name made the name the identity: two
+        people called "John Smith" collapsed onto one row, and renaming
+        yourself mid-meeting replaced your row with a stranger's — which on a
+        picker means one person can never be drawn and another gets drawn
+        twice after already speaking. The counter is never reset — not even by
+        _wipe(), which clears the roster for demo mode — so an id is never
+        reused and a stale client can't address a departed person's row.
+
+        Panel reads can't deliver duplicate names today (_filter_and_dedupe
+        collapses them first), so a second "John Smith" only ever arrives via
+        a manual add or a direct API call.
+        """
+        self._pid_seq += 1
+        return f"{prefix}{self._pid_seq:x}"
 
     def _new_topic_id(self) -> str:
         self._topic_seq += 1
@@ -668,12 +757,226 @@ class State:
         for q in clients:
             with contextlib.suppress(Exception):
                 q.put_nowait(data)
+        # Every mutation ends here, so this is the one place that catches them
+        # all.
+        self.persist()
+
+    # --- session persistence ----------------------------------------------
+    def session_payload(self) -> dict[str, object]:
+        """The state a restore needs, in display order.
+
+        Deliberately not `snapshot()`: that is the client view (assignee names
+        inlined, internal ids dropped from topics), which cannot be rebuilt
+        from. This writes the raw rows instead.
+        """
+        with self.lock:
+            return {
+                "schema": SESSION_SCHEMA,
+                "savedAt": time.time(),
+                "startedAt": self.started_at,
+                "participants": [
+                    dict(self.participants[pid])
+                    for pid in self.order
+                    if pid in self.participants
+                ],
+                "topics": [
+                    dict(self.topics[tid])
+                    for tid in self.topic_order
+                    if tid in self.topics
+                ],
+                "selectedPid": self.selected_pid,
+                "activeTopicId": self.active_topic_id,
+            }
+
+    def persist(self) -> None:
+        """Write the session file. Called from broadcast(), so every mutation
+        lands on disk before the process can die on the next one.
+
+        Deliberately unthrottled. A time-based throttle drops the *last* write
+        of a burst -- and the last mutation before a crash is exactly the one
+        recovery needs, typically the "done" that records who just spoke. The
+        cost it was guarding doesn't exist either: the poller only broadcasts
+        when the roster actually changed, so the remaining callers are host
+        actions, and this is a couple of KB next to the snapshot JSON
+        broadcast() already builds.
+
+        Failures are swallowed: a read-only or full disk must not take down a
+        meeting that is otherwise working fine, and the file is only ever a
+        convenience.
+        """
+        path = self.session_path
+        if path is None or self.demo:
+            # The demo is sample data; restoring it would be noise, and it must
+            # never overwrite a real session the host is mid-way through.
+            return
+        # Snapshot and write under one lock, so the file can't end up holding
+        # an older state than one already acknowledged. The server is threaded
+        # and the poller is a thread of its own, so two mutations really do
+        # land here at once; without this, two threads could interleave their
+        # writes, or take snapshots in one order and os.replace in the other,
+        # leaving recovery a state the host had already moved past.
+        #
+        # A separate lock, not self.lock: broadcast() is always called with
+        # self.lock released, so the order here is only ever _persist_lock ->
+        # self.lock (taken inside session_payload) and can't invert.
+        with self._persist_lock:
+            payload = self.session_payload()
+            with contextlib.suppress(OSError, TypeError, ValueError):
+                # Write-then-rename so a crash mid-write can't leave a
+                # truncated file that the next launch would offer to restore.
+                # The temp name carries the pid so a second board sharing this
+                # directory can't scribble through the same partial file --
+                # os.replace is atomic, so the worst case becomes a stale
+                # session rather than an unreadable one.
+                tmp = _session_tmp(path)
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump(payload, fh)
+                os.replace(tmp, path)
+
+    def restore_session(self, payload: dict[str, object]) -> None:
+        """Rebuild the roster and topics from a session file.
+
+        Ids are re-minted rather than reused. They are monotonic counters (see
+        _new_pid), so adopting saved ids would let the counter hand the same id
+        out a second time later in the meeting. Assignees and the selection are
+        remapped onto the new ids; anything that fails to remap is dropped
+        rather than left dangling.
+        """
+        raw_people = payload.get("participants")
+        raw_topics = payload.get("topics")
+        with self.lock:
+            self._wipe()
+            pid_map: dict[str, str] = {}
+            if isinstance(raw_people, list):
+                for entry in raw_people:
+                    if isinstance(entry, dict):
+                        self._restore_participant(entry, pid_map)
+            tid_map: dict[str, str] = {}
+            if isinstance(raw_topics, list):
+                for entry in raw_topics:
+                    if isinstance(entry, dict):
+                        self._restore_topic(entry, pid_map, tid_map)
+            self.selected_pid = pid_map.get(str(payload.get("selectedPid") or ""))
+            self.active_topic_id = tid_map.get(str(payload.get("activeTopicId") or ""))
+            started = payload.get("startedAt")
+            if isinstance(started, int | float):
+                self.started_at = float(started)
+        self.broadcast()
+
+    def _restore_participant(
+        self, saved: dict[str, object], pid_map: dict[str, str]
+    ) -> None:
+        """Re-add one saved participant under a freshly minted id."""
+        name = str(saved.get("name") or "").strip()
+        if not name:
+            return
+        source = str(saved.get("source") or "manual")
+        if source == "demo":
+            return  # sample data; never restored
+        pid = self._new_pid("a" if source == "auto" else "m")
+        pid_map[str(saved.get("id") or "")] = pid
+        join_time = saved.get("joinTime")
+        left_time = saved.get("leftTime")
+        self.participants[pid] = {
+            "id": pid,
+            "name": name,
+            "source": source,
+            "joinTime": float(join_time) if isinstance(join_time, int | float) else 0.0,
+            "leftTime": float(left_time)
+            if isinstance(left_time, int | float)
+            else None,
+            "present": bool(saved.get("present", True)),
+            "answered": bool(saved.get("answered")),
+            "is_host": bool(saved.get("is_host")),
+            "excluded": bool(saved.get("excluded")),
+        }
+        self.order.append(pid)
+
+    def _restore_topic(
+        self,
+        saved: dict[str, object],
+        pid_map: dict[str, str],
+        tid_map: dict[str, str],
+    ) -> None:
+        """Re-add one saved topic, remapping its assignee onto the new ids."""
+        headline = str(saved.get("headline") or "").strip()
+        if not headline:
+            return
+        tid = self._new_topic_id()
+        tid_map[str(saved.get("id") or "")] = tid
+        assignee = pid_map.get(str(saved.get("assignee") or ""))
+        status = str(saved.get("status") or "open")
+        if assignee is None and status in {"active", "done"}:
+            # The person this topic belonged to didn't survive the restore, so
+            # the status has nobody to refer to. Reopening beats showing a topic
+            # as taken by nobody.
+            status = "open"
+        self.topics[tid] = {
+            "id": tid,
+            "headline": headline,
+            "details": str(saved.get("details") or ""),
+            "status": status,
+            "assignee": assignee,
+        }
+        self.topic_order.append(tid)
 
     # --- participant mutations --------------------------------------------
     def add_manual(self, name: str) -> None:
         with self.lock:
-            self._upsert(self._id("m", name + str(time.time())), name, "manual")
+            self._upsert(self._new_pid("m"), name, "manual")
         self.broadcast()
+
+    def _auto_name_pool(self) -> dict[str, list[str]]:
+        """Existing auto-read participants, bucketed by lowercased name."""
+        pool: dict[str, list[str]] = {}
+        for pid, p in self.participants.items():
+            if p["source"] == "auto":
+                pool.setdefault(p["name"].lower(), []).append(pid)
+        return pool
+
+    def _vanished_present(self, claimed: set[str]) -> list[str]:
+        """Present auto-read participants who did not show up in this read."""
+        return [
+            pid
+            for pid, p in self.participants.items()
+            if p["source"] == "auto" and pid not in claimed and p["present"]
+        ]
+
+    def _apply_rename(self, matched: list[str | None]) -> None:
+        """Rebind the one unmatched name that is really a rename, in place.
+
+        Only a one-for-one swap counts: exactly one present auto-read
+        participant vanished from the panel and exactly one unfamiliar name
+        took their place, leaving a single possible pairing. With two or more
+        on either side the pairing would be a guess, and guessing wrong carries
+        somebody's "already spoke" flag onto the wrong person — so those are
+        left alone as an ordinary leave plus join.
+
+        Even the one-for-one case is a judgement call: within a single poll a
+        rename is indistinguishable from one person leaving as another joins.
+        Renames are much the commoner event at this granularity, so they win,
+        and being wrong costs one misplaced flag the host can clear.
+        """
+        vanished = self._vanished_present({p for p in matched if p is not None})
+        fresh = [i for i, pid in enumerate(matched) if pid is None]
+        if len(vanished) == 1 and len(fresh) == 1:
+            matched[fresh[0]] = vanished[0]
+
+    def _assign_auto_pids(self, names: list[str]) -> list[str]:
+        """Resolve each panel name to a stable participant id.
+
+        Names are matched against existing auto-read participants one-for-one
+        and each match is consumed, so repeated display names stay on separate
+        rows instead of collapsing. Whoever is left over is either a rename
+        (see _apply_rename) or genuinely new.
+        """
+        pool = self._auto_name_pool()
+        matched: list[str | None] = []
+        for nm in names:
+            bucket = pool.get(nm.lower())
+            matched.append(bucket.pop(0) if bucket else None)
+        self._apply_rename(matched)
+        return [pid or self._new_pid("a") for pid in matched]
 
     def _upsert_seen(
         self, people: list[Person], seen: set[str]
@@ -683,11 +986,13 @@ class State:
         (sync_participants) owns the lock."""
         host_pid: str | None = None
         changed = False
-        for entry in people:
-            nm = str(entry.get("name") or "").strip()
-            if not nm:
-                continue
-            pid = self._id("a", nm)
+        named = [
+            (entry, nm)
+            for entry in people
+            if (nm := str(entry.get("name") or "").strip())
+        ]
+        pids = self._assign_auto_pids([nm for _, nm in named])
+        for (entry, nm), pid in zip(named, pids, strict=True):
             seen.add(pid)
             if entry.get("is_host"):
                 host_pid = pid
@@ -1011,6 +1316,84 @@ class State:
 
 
 STATE = State()
+
+
+# --- Session file I/O ------------------------------------------------------
+def load_session(
+    path: str, ttl: float = SESSION_TTL_SECONDS
+) -> dict[str, object] | None:
+    """Read a resumable session, or None if there isn't one worth offering.
+
+    Returns None for every "not resumable" case alike -- absent, unreadable,
+    corrupt, written by a different schema, or older than `ttl`. A session that
+    has aged out belonged to an earlier meeting, and silently offering it would
+    be worse than offering nothing.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except OSError, ValueError:
+        return None
+    if not isinstance(payload, dict) or payload.get("schema") != SESSION_SCHEMA:
+        return None
+    saved_at = payload.get("savedAt")
+    if not isinstance(saved_at, int | float) or time.time() - saved_at > ttl:
+        return None
+    return payload
+
+
+def clear_session(path: str) -> None:
+    """Remove the session file and any half-written temp beside it."""
+    for p in (path, _session_tmp(path)):
+        with contextlib.suppress(OSError):
+            os.remove(p)
+
+
+def describe_session(payload: dict[str, object]) -> str:
+    """One line for the resume prompt: when it was saved, and how far in."""
+    saved_at = payload.get("savedAt")
+    when = (
+        time.strftime("%-I:%M %p", time.localtime(saved_at))
+        if isinstance(saved_at, int | float)
+        else "an earlier session"
+    )
+    people = payload.get("participants")
+    roster = (
+        [p for p in people if isinstance(p, dict)] if isinstance(people, list) else []
+    )
+    gone = sum(1 for p in roster if p.get("answered"))
+    if not roster:
+        return f"session from {when}"
+    return f"session from {when} — {gone} of {len(roster)} already gone"
+
+
+def maybe_resume(state: State, path: str, no_resume: bool) -> bool:
+    """Offer to restore a previous session. Returns True if one was restored.
+
+    Always asks. A session file means the last run died without cleaning up,
+    and the host is the only one who knows whether that was this meeting or
+    yesterday's. Without a terminal to ask on we decline and leave the file
+    alone, rather than adopting a session nobody confirmed.
+    """
+    if no_resume:
+        return False
+    payload = load_session(path)
+    if payload is None:
+        return False
+    if not sys.stdin.isatty():
+        sys.stderr.write(
+            f"[session] found a {describe_session(payload)}, but there's no "
+            "terminal to confirm on; starting fresh (--no-resume to silence)\n"
+        )
+        return False
+    answer = input(f"  Resume {describe_session(payload)}? [Y/n] ").strip().lower()
+    if answer in {"n", "no"}:
+        clear_session(path)
+        print("  Starting fresh.\n")
+        return False
+    state.restore_session(payload)
+    print("  Resumed.\n")
+    return True
 
 
 # --- HTTP + SSE ------------------------------------------------------------
@@ -1368,6 +1751,11 @@ def main() -> None:
         "--no-ax", action="store_true", help="manual entry only; do not read Zoom"
     )
     ap.add_argument("--debug", action="store_true")
+    ap.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="always start fresh; never offer to restore an interrupted session",
+    )
     args = ap.parse_args()
 
     exclude_re = build_exclude_re(
@@ -1386,10 +1774,29 @@ def main() -> None:
     srv = QuietHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"\n  Table Topics board:  http://localhost:{args.port}")
     print(f"  Mode: {mode}")
+    maybe_resume(STATE, SESSION_FILE, args.no_resume)
+    # Armed only after the resume decision, so declining can't be immediately
+    # overwritten by a persist of the empty board we just chose to start with.
+    STATE.session_path = SESSION_FILE
+
+    def _on_sigterm(*_: object) -> None:
+        """SIGTERM is a deliberate stop (`kill`, a process manager), so treat it
+        exactly like Ctrl-C. Note this is the *only* other exit that clears the
+        file: an unhandled crash must fall through untouched, since that is the
+        one case the recovery file exists for."""
+        clear_session(SESSION_FILE)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _on_sigterm)
+
     print("  Open the URL and screen-share that tab. Ctrl-C to stop.\n")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
+        # A clean quit ends the meeting, so the session file has done its job.
+        # Leaving it would mean the next launch offers to resume a meeting the
+        # host deliberately finished.
+        clear_session(SESSION_FILE)
         print("\nStopped.")
 
 

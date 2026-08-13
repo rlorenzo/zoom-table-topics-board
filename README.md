@@ -81,6 +81,18 @@ whole setup.
 State lives for the meeting only. *New round* clears assignments and starts a
 fresh round with the same topics and roster.
 
+If the board dies mid-meeting — a crash, a closed terminal, a laptop asleep —
+the next `uv run board.py` offers to pick up where you left off:
+
+```text
+  Resume session from 7:42 PM — 3 of 9 already gone? [Y/n]
+```
+
+Say no and it starts clean. This is crash recovery only: quitting normally with
+Ctrl-C clears the saved session, and one more than a few hours old is never
+offered, so nothing carries over between meetings. Pass `--no-resume` to skip
+the question entirely.
+
 ## Auto-reading Zoom on macOS
 
 Auto-read uses pyobjc and the macOS Accessibility permission. Both are installed
@@ -126,6 +138,7 @@ uv run board.py --no-ax
 | `--exclude` | (none) | Extra comma-separated terms to drop from names |
 | `--min-len` | `2` | Minimum length for a string to count as a name |
 | `--debug` | off | Print reader diagnostics to stderr |
+| `--no-resume` | off | Always start fresh; never offer to restore an interrupted run |
 
 ## Design
 

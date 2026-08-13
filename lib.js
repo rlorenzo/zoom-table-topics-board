@@ -14,12 +14,24 @@ export function escapeHtml(s) {
 }
 
 // ---- paste parsing -----------------------------------------------
+// Leading list markers from wherever the host drafted their topics: "1." /
+// "1)" / "(1)" numbering from Notes or Word, and "-" / "*" / "+" / "•" bullets.
+// Hosts paste from a document, and the marker is the document's formatting, not
+// part of the prompt -- left in, it gets read out to the room on the focus
+// screen. Stripped here rather than at the input, so it applies to a pasted
+// block and a re-seeded localStorage set alike.
+//
+// Deliberately not touched: a bare "1976" or "3 wishes" opening a real prompt
+// has no trailing separator, and a lone "-" with nothing after it isn't a
+// marker, it's the whole line.
+const LIST_MARKER = /^\s*(?:\(?\d{1,3}[.)]|[-*+•‣▪])\s+/;
+
 // One topic per line; the first "|" splits "headline | details". Blank lines
 // and entries with no headline are dropped.
 export function parsePaste(text) {
   return text
     .split("\n")
-    .map((line) => line.trim())
+    .map((line) => line.replace(LIST_MARKER, "").trim())
     .filter(Boolean)
     .map((line) => {
       const i = line.indexOf("|");

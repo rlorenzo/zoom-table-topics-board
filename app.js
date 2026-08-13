@@ -162,6 +162,7 @@ function resetReveal() {
   $("stage").classList.remove("lit");
   lastSelectedId = null;
   revealActive = false;
+  settledId = null; // nothing is painted any more, so the next settle must run
 }
 
 // Monotonic render counter: a view transition applies its snapshot in an async
@@ -548,11 +549,30 @@ function renderPickChoices(s) {
   $("randomTopicBtn").disabled = s.topics.filter((t) => t.status === "open").length === 0;
 }
 
+// Set by the roster's "select" action: the id the host picked by hand, awaiting
+// the snapshot that confirms it. Cleared as soon as any selection lands, so it
+// can never leak onto a later random roll.
+let pendingManualPid = null;
+
+// Whose name is currently painted in the settled state. settleReveal restarts
+// the "flourish" pop every time it runs, and renderPicking runs on every
+// snapshot — with the Zoom poller broadcasting every few seconds, re-settling
+// an already-settled name made the spotlight pulse on a timer for the whole
+// room. Tracked so a re-render only repaints when the selection actually
+// changed.
+let settledId = null;
+
 // A brand-new selection plays the shuffle reveal; re-rendering onto an
 // already-settled one (e.g. a topic was removed mid-pick) keeps the settled UI.
+// A hand-picked person skips the roll and lands settled immediately.
 function applyReveal(s, sel, isNew) {
-  if (isNew) startReveal(s, sel);
-  else if (!revealActive) settleReveal(sel);
+  const manual = sel && sel.id === pendingManualPid;
+  if (isNew) pendingManualPid = null;
+  if (isNew && !manual) {
+    startReveal(s, sel);
+  } else if (isNew || (!revealActive && (sel ? sel.id : null) !== settledId)) {
+    settleReveal(sel);
+  }
 }
 
 function renderPicking(s) {
@@ -652,6 +672,7 @@ function settleReveal(sel, burst = false) {
   banner.classList.add("show");
   choicesBox.classList.add("show");
   $("stage").classList.add("lit"); // bloom the spotlight on the settled name
+  settledId = sel ? sel.id : null;
   if (burst && sel) celebrateReveal();
 }
 
@@ -850,7 +871,22 @@ const CLICK_ACTIONS = {
   reopen: (tid) => tid && post(`/api/topic/${tid}/reopen`),
   "remove-topic": (tid) => tid && confirm("Remove this topic?") && post(`/api/topic/${tid}/remove`),
   edit: (tid) => tid && editTopic(tid),
-  select: (_tid, pid) => pid && post("/api/select", { pid }),
+  select: (_tid, pid) => {
+    if (!pid) return;
+    // The host chose this person deliberately, so there is no draw to dramatize
+    // — rolling through other names would be theatre for a decision already
+    // made, and it delays the room seeing who is up. Remembered by id so a
+    // *random* roll that happens to land on the same person still gets its
+    // reveal.
+    pendingManualPid = pid;
+    postOk("/api/select", { pid }).then((ok) => {
+      // A rejected select never becomes a selection, so nothing clears the
+      // marker — it would sit there until some later random roll happened to
+      // land on this same person, and then rob that draw of its reveal.
+      // Guarded on the id in case a second pick was started in the meantime.
+      if (!ok && pendingManualPid === pid) pendingManualPid = null;
+    });
+  },
   "remove-p": (_tid, pid) => pid && post(`/api/participant/${pid}/remove`),
   exclude: (_tid, pid) => {
     if (!pid) return;

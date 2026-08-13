@@ -63,6 +63,44 @@ describe("parsePaste", () => {
   it("returns [] for empty input", () => {
     expect(parsePaste("")).toEqual([]);
   });
+
+  // Hosts draft topics in Notes/Word and paste the block in. The list marker is
+  // the document's formatting, not the prompt — left in, it gets read out to
+  // the room on the focus screen.
+  it("strips numbered list markers", () => {
+    expect(parsePaste("1. First\n2. Second\n10. Tenth")).toEqual([
+      { headline: "First", details: "" },
+      { headline: "Second", details: "" },
+      { headline: "Tenth", details: "" },
+    ]);
+  });
+  it("strips the other numbering styles", () => {
+    expect(parsePaste("1) Paren\n(2) Wrapped")).toEqual([
+      { headline: "Paren", details: "" },
+      { headline: "Wrapped", details: "" },
+    ]);
+  });
+  it("strips bullet markers", () => {
+    expect(parsePaste("- Dash\n* Star\n+ Plus\n• Dot")).toEqual([
+      { headline: "Dash", details: "" },
+      { headline: "Star", details: "" },
+      { headline: "Plus", details: "" },
+      { headline: "Dot", details: "" },
+    ]);
+  });
+  it("keeps a leading number that is part of the prompt", () => {
+    // No trailing "." or ")" separator, so it isn't a list marker.
+    expect(parsePaste("1976 was a big year\n3 wishes, one regret")).toEqual([
+      { headline: "1976 was a big year", details: "" },
+      { headline: "3 wishes, one regret", details: "" },
+    ]);
+  });
+  it("keeps a lone dash, which is a line not a marker", () => {
+    expect(parsePaste("-")).toEqual([{ headline: "-", details: "" }]);
+  });
+  it("strips the marker before splitting details", () => {
+    expect(parsePaste("1. Topic | details")).toEqual([{ headline: "Topic", details: "details" }]);
+  });
 });
 
 describe("eligibleNames", () => {
