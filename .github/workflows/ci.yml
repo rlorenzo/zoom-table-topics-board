@@ -19,7 +19,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d  # v10.0.0
         with:
-          enable-cache: true
+          # "auto" caches as "true" does, except on pull_request_target,
+          # workflow_run, and release, where setup-uv v10 drops the cache to
+          # avoid poisoning. This job runs on push and pull_request only, so
+          # today the two behave identically — "auto" just means a later
+          # trigger change can't silently opt us out of that protection.
+          enable-cache: auto
 
       - name: Set up Python
         run: uv python install 3.14
