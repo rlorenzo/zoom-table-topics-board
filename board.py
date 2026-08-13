@@ -13,6 +13,7 @@ Table Topic. No Node, no browser automation, no Zoom credentials.
     python3 board.py --port 3000
     python3 board.py --anchor-regex 'participants|attendees'
     python3 board.py --exclude "pin,spotlight" --debug
+    python3 board.py --no-resume     # never offer to restore an interrupted run
 
 Then open http://localhost:3000 and screen-share that browser tab.
 
@@ -34,6 +35,7 @@ import os
 import queue
 import random
 import re
+import signal
 import sys
 import threading
 import time
@@ -561,8 +563,27 @@ DEMO_TOPICS: list[dict[str, str]] = [
 
 
 # --- State -----------------------------------------------------------------
+# --- Session persistence (crash recovery only) -----------------------------
+# PRODUCT.md keeps the roster and matching "ephemeral to the meeting", and that
+# stays true: this file is deleted on a clean exit and ignored once stale, so
+# nothing accumulates across meetings and a normal quit leaves no trace. What it
+# recovers is the other thing entirely -- a meeting that ended *unexpectedly*.
+# Losing who has already spoken because the process died mid-round isn't
+# privacy, it's lost work, and it costs the host the one thing the board exists
+# to track. Restore always asks first, so a stale or wrong session is one
+# keypress away from being discarded rather than silently adopted.
+SESSION_FILE = os.path.join(HERE, ".board-session.json")
+SESSION_SCHEMA = 1
+# Past this, a session is assumed to belong to an earlier meeting, not this one.
+SESSION_TTL_SECONDS = 4 * 60 * 60
+# Roster churn re-broadcasts constantly; don't write on every one.
+SESSION_WRITE_INTERVAL = 1.0
+
+
 class State:
-    """In-memory, per-meeting state. Ephemeral: nothing is persisted server-side.
+    """In-memory, per-meeting state. Ephemeral: nothing is persisted server-side
+    except the crash-recovery session file (see SESSION_FILE), which a clean
+    exit removes.
 
     Holds the participant roster (auto-read from Zoom and/or added by hand),
     the Table Topics, the currently *selected* participant (rolled but not yet
@@ -583,6 +604,10 @@ class State:
         self.clients: set[queue.Queue[str]] = set()  # one Queue per SSE client
         self._topic_seq = 0  # monotonic, never reused even across reset
         self._pid_seq = 0  # ditto, for participant ids (see _new_pid)
+        # None disables persistence entirely, which is the default so tests and
+        # library use never touch the disk; main() opts the real server in.
+        self.session_path: str | None = None
+        self._last_persist = 0.0
 
     # --- id helpers --------------------------------------------------------
     def _new_pid(self, prefix: str) -> str:
@@ -729,6 +754,148 @@ class State:
         for q in clients:
             with contextlib.suppress(Exception):
                 q.put_nowait(data)
+        # Every mutation ends here, so this is the one place that catches them
+        # all. It self-throttles; see persist().
+        self.persist()
+
+    # --- session persistence ----------------------------------------------
+    def session_payload(self) -> dict[str, object]:
+        """The state a restore needs, in display order.
+
+        Deliberately not `snapshot()`: that is the client view (assignee names
+        inlined, internal ids dropped from topics), which cannot be rebuilt
+        from. This writes the raw rows instead.
+        """
+        with self.lock:
+            return {
+                "schema": SESSION_SCHEMA,
+                "savedAt": time.time(),
+                "startedAt": self.started_at,
+                "participants": [
+                    dict(self.participants[pid])
+                    for pid in self.order
+                    if pid in self.participants
+                ],
+                "topics": [
+                    dict(self.topics[tid])
+                    for tid in self.topic_order
+                    if tid in self.topics
+                ],
+                "selectedPid": self.selected_pid,
+                "activeTopicId": self.active_topic_id,
+            }
+
+    def persist(self, force: bool = False) -> None:
+        """Write the session file, at most every SESSION_WRITE_INTERVAL.
+
+        Called from broadcast(), so it runs after every mutation. Failures are
+        swallowed: a read-only or full disk must not take down a meeting that is
+        otherwise working fine, and the file is only ever a convenience.
+        """
+        path = self.session_path
+        if path is None or self.demo:
+            # The demo is sample data; restoring it would be noise, and it must
+            # never overwrite a real session the host is mid-way through.
+            return
+        now = time.monotonic()
+        if not force and now - self._last_persist < SESSION_WRITE_INTERVAL:
+            return
+        self._last_persist = now
+        payload = self.session_payload()
+        with contextlib.suppress(OSError, TypeError, ValueError):
+            # Write-then-rename so a crash mid-write can't leave a truncated
+            # file that the next launch would offer to restore.
+            tmp = f"{path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            os.replace(tmp, path)
+
+    def restore_session(self, payload: dict[str, object]) -> None:
+        """Rebuild the roster and topics from a session file.
+
+        Ids are re-minted rather than reused. They are monotonic counters (see
+        _new_pid), so adopting saved ids would let the counter hand the same id
+        out a second time later in the meeting. Assignees and the selection are
+        remapped onto the new ids; anything that fails to remap is dropped
+        rather than left dangling.
+        """
+        raw_people = payload.get("participants")
+        raw_topics = payload.get("topics")
+        with self.lock:
+            self._wipe()
+            pid_map: dict[str, str] = {}
+            if isinstance(raw_people, list):
+                for entry in raw_people:
+                    if isinstance(entry, dict):
+                        self._restore_participant(entry, pid_map)
+            tid_map: dict[str, str] = {}
+            if isinstance(raw_topics, list):
+                for entry in raw_topics:
+                    if isinstance(entry, dict):
+                        self._restore_topic(entry, pid_map, tid_map)
+            self.selected_pid = pid_map.get(str(payload.get("selectedPid") or ""))
+            self.active_topic_id = tid_map.get(str(payload.get("activeTopicId") or ""))
+            started = payload.get("startedAt")
+            if isinstance(started, int | float):
+                self.started_at = float(started)
+        self.broadcast()
+
+    def _restore_participant(
+        self, saved: dict[str, object], pid_map: dict[str, str]
+    ) -> None:
+        """Re-add one saved participant under a freshly minted id."""
+        name = str(saved.get("name") or "").strip()
+        if not name:
+            return
+        source = str(saved.get("source") or "manual")
+        if source == "demo":
+            return  # sample data; never restored
+        pid = self._new_pid("a" if source == "auto" else "m")
+        pid_map[str(saved.get("id") or "")] = pid
+        join_time = saved.get("joinTime")
+        left_time = saved.get("leftTime")
+        self.participants[pid] = {
+            "id": pid,
+            "name": name,
+            "source": source,
+            "joinTime": float(join_time) if isinstance(join_time, int | float) else 0.0,
+            "leftTime": float(left_time)
+            if isinstance(left_time, int | float)
+            else None,
+            "present": bool(saved.get("present", True)),
+            "answered": bool(saved.get("answered")),
+            "is_host": bool(saved.get("is_host")),
+            "excluded": bool(saved.get("excluded")),
+        }
+        self.order.append(pid)
+
+    def _restore_topic(
+        self,
+        saved: dict[str, object],
+        pid_map: dict[str, str],
+        tid_map: dict[str, str],
+    ) -> None:
+        """Re-add one saved topic, remapping its assignee onto the new ids."""
+        headline = str(saved.get("headline") or "").strip()
+        if not headline:
+            return
+        tid = self._new_topic_id()
+        tid_map[str(saved.get("id") or "")] = tid
+        assignee = pid_map.get(str(saved.get("assignee") or ""))
+        status = str(saved.get("status") or "open")
+        if assignee is None and status in {"active", "done"}:
+            # The person this topic belonged to didn't survive the restore, so
+            # the status has nobody to refer to. Reopening beats showing a topic
+            # as taken by nobody.
+            status = "open"
+        self.topics[tid] = {
+            "id": tid,
+            "headline": headline,
+            "details": str(saved.get("details") or ""),
+            "status": status,
+            "assignee": assignee,
+        }
+        self.topic_order.append(tid)
 
     # --- participant mutations --------------------------------------------
     def add_manual(self, name: str) -> None:
@@ -1128,6 +1295,84 @@ class State:
 STATE = State()
 
 
+# --- Session file I/O ------------------------------------------------------
+def load_session(
+    path: str, ttl: float = SESSION_TTL_SECONDS
+) -> dict[str, object] | None:
+    """Read a resumable session, or None if there isn't one worth offering.
+
+    Returns None for every "not resumable" case alike -- absent, unreadable,
+    corrupt, written by a different schema, or older than `ttl`. A session that
+    has aged out belonged to an earlier meeting, and silently offering it would
+    be worse than offering nothing.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except OSError, ValueError:
+        return None
+    if not isinstance(payload, dict) or payload.get("schema") != SESSION_SCHEMA:
+        return None
+    saved_at = payload.get("savedAt")
+    if not isinstance(saved_at, int | float) or time.time() - saved_at > ttl:
+        return None
+    return payload
+
+
+def clear_session(path: str) -> None:
+    """Remove the session file and any half-written temp beside it."""
+    for p in (path, f"{path}.tmp"):
+        with contextlib.suppress(OSError):
+            os.remove(p)
+
+
+def describe_session(payload: dict[str, object]) -> str:
+    """One line for the resume prompt: when it was saved, and how far in."""
+    saved_at = payload.get("savedAt")
+    when = (
+        time.strftime("%-I:%M %p", time.localtime(saved_at))
+        if isinstance(saved_at, int | float)
+        else "an earlier session"
+    )
+    people = payload.get("participants")
+    roster = (
+        [p for p in people if isinstance(p, dict)] if isinstance(people, list) else []
+    )
+    gone = sum(1 for p in roster if p.get("answered"))
+    if not roster:
+        return f"session from {when}"
+    return f"session from {when} — {gone} of {len(roster)} already gone"
+
+
+def maybe_resume(state: State, path: str, no_resume: bool) -> bool:
+    """Offer to restore a previous session. Returns True if one was restored.
+
+    Always asks. A session file means the last run died without cleaning up,
+    and the host is the only one who knows whether that was this meeting or
+    yesterday's. Without a terminal to ask on we decline and leave the file
+    alone, rather than adopting a session nobody confirmed.
+    """
+    if no_resume:
+        return False
+    payload = load_session(path)
+    if payload is None:
+        return False
+    if not sys.stdin.isatty():
+        sys.stderr.write(
+            f"[session] found a {describe_session(payload)}, but there's no "
+            "terminal to confirm on; starting fresh (--no-resume to silence)\n"
+        )
+        return False
+    answer = input(f"  Resume {describe_session(payload)}? [Y/n] ").strip().lower()
+    if answer in {"n", "no"}:
+        clear_session(path)
+        print("  Starting fresh.\n")
+        return False
+    state.restore_session(payload)
+    print("  Resumed.\n")
+    return True
+
+
 # --- HTTP + SSE ------------------------------------------------------------
 # In-memory cache of static assets, keyed by path and invalidated on mtime so a
 # live edit during development still shows up. Saves a disk read per request.
@@ -1483,6 +1728,11 @@ def main() -> None:
         "--no-ax", action="store_true", help="manual entry only; do not read Zoom"
     )
     ap.add_argument("--debug", action="store_true")
+    ap.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="always start fresh; never offer to restore an interrupted session",
+    )
     args = ap.parse_args()
 
     exclude_re = build_exclude_re(
@@ -1501,10 +1751,29 @@ def main() -> None:
     srv = QuietHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"\n  Table Topics board:  http://localhost:{args.port}")
     print(f"  Mode: {mode}")
+    maybe_resume(STATE, SESSION_FILE, args.no_resume)
+    # Armed only after the resume decision, so declining can't be immediately
+    # overwritten by a persist of the empty board we just chose to start with.
+    STATE.session_path = SESSION_FILE
+
+    def _on_sigterm(*_: object) -> None:
+        """SIGTERM is a deliberate stop (`kill`, a process manager), so treat it
+        exactly like Ctrl-C. Note this is the *only* other exit that clears the
+        file: an unhandled crash must fall through untouched, since that is the
+        one case the recovery file exists for."""
+        clear_session(SESSION_FILE)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _on_sigterm)
+
     print("  Open the URL and screen-share that tab. Ctrl-C to stop.\n")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
+        # A clean quit ends the meeting, so the session file has done its job.
+        # Leaving it would mean the next launch offers to resume a meeting the
+        # host deliberately finished.
+        clear_session(SESSION_FILE)
         print("\nStopped.")
 
 

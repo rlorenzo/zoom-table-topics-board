@@ -1008,3 +1008,151 @@ class TestParticipantIdentity:
         state.sync_participants([{"name": "Autumn", "is_host": False}])
         assert _pid_of(state, "Manny").startswith("m")
         assert _pid_of(state, "Autumn").startswith("a")
+
+
+class TestSessionPersistence:
+    """Crash recovery, scoped so it can't outlive the meeting it belongs to.
+
+    PRODUCT.md keeps the roster and matching ephemeral across meetings; these
+    tests pin the boundary that makes both true at once -- a clean exit and a
+    stale file both leave nothing to restore, while a run that died mid-meeting
+    can be picked back up.
+    """
+
+    @pytest.fixture
+    def path(self, tmp_path):
+        return str(tmp_path / ".board-session.json")
+
+    @pytest.fixture
+    def live(self, state, path):
+        """A state that persists, mid-meeting: two people, one already gone."""
+        state.session_path = path
+        state.sync_participants(
+            [{"name": "Alice", "is_host": True}, {"name": "Bob", "is_host": False}]
+        )
+        tid = state.add_topic("What is courage?", "some details")
+        state.select_participant(_pid_of(state, "Alice"))
+        state.assign(tid)
+        state.mark_done(tid)
+        state.persist(force=True)
+        return state
+
+    def test_persist_is_off_until_a_path_is_set(self, state, path):
+        # The default must never touch the disk: library use and the test suite
+        # both construct State freely.
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+        state.persist(force=True)
+        assert board.load_session(path) is None
+
+    def test_round_trips_who_has_already_gone(self, live, path, state):
+        restored = board.State()
+        payload = board.load_session(path)
+        assert payload is not None
+        restored.restore_session(payload)
+
+        assert _names(restored.snapshot()) == ["Alice", "Bob"]
+        assert _by_name(restored, "Alice")["answered"] is True
+        assert _by_name(restored, "Bob")["answered"] is False
+        assert _by_name(restored, "Alice")["is_host"] is True
+
+    def test_restored_topic_still_points_at_its_speaker(self, live, path):
+        restored = board.State()
+        restored.restore_session(board.load_session(path))
+        snap = restored.snapshot()
+        topic = _topic_by_headline(snap, "What is courage?")
+        assert topic["status"] == "done"
+        assert topic["assignee"]["name"] == "Alice"
+        # Remapped onto the new id, not the saved one.
+        assert topic["assignee"]["id"] == _pid_of(restored, "Alice")
+
+    def test_restored_ids_do_not_collide_with_later_ones(self, live, path):
+        # Ids are monotonic counters; adopting saved ids would let the counter
+        # hand the same one out again later in the meeting.
+        restored = board.State()
+        restored.restore_session(board.load_session(path))
+        existing = {p["id"] for p in restored.participants.values()}
+        restored.add_manual("Carol")
+        restored.sync_participants([{"name": "Dave", "is_host": False}])
+        fresh = {p["id"] for p in restored.participants.values()} - existing
+        assert len(fresh) == 2
+        assert not (fresh & existing)
+
+    def test_zoom_reads_reattach_to_restored_rows_by_name(self, live, path):
+        # Ids are re-minted, so the next panel read must rejoin on name via the
+        # normal pool matching -- otherwise everyone doubles up on resume.
+        restored = board.State()
+        restored.restore_session(board.load_session(path))
+        restored.sync_participants(
+            [{"name": "Alice", "is_host": True}, {"name": "Bob", "is_host": False}]
+        )
+        assert _names(restored.snapshot()) == ["Alice", "Bob"]
+        assert _by_name(restored, "Alice")["answered"] is True
+
+    def test_clean_exit_leaves_nothing_to_resume(self, live, path):
+        board.clear_session(path)
+        assert board.load_session(path) is None
+
+    def test_a_stale_session_is_not_offered(self, live, path):
+        # Older than the TTL means it belonged to an earlier meeting.
+        assert board.load_session(path, ttl=0) is None
+        assert board.load_session(path, ttl=3600) is not None
+
+    @pytest.mark.parametrize(
+        "content", ["", "not json at all", "[]", '{"schema": 999, "savedAt": 0}']
+    )
+    def test_unusable_files_are_declined_not_crashed(self, path, content):
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        assert board.load_session(path) is None
+
+    def test_demo_never_overwrites_a_real_session(self, live, path):
+        before = board.load_session(path)
+        live.start_demo()
+        live.persist(force=True)
+        after = board.load_session(path)
+        assert [p["name"] for p in after["participants"]] == [
+            p["name"] for p in before["participants"]
+        ]
+
+    def test_demo_participants_are_dropped_on_restore(self, state, path):
+        state.session_path = path
+        state.start_demo()
+        # Force a demo payload onto disk the way a crash never would, to prove
+        # restore itself refuses sample data rather than relying on the writer.
+        payload = state.session_payload()
+        restored = board.State()
+        restored.restore_session(payload)
+        assert restored.snapshot()["participants"] == []
+
+    def test_orphaned_assignment_reopens_rather_than_dangling(self, path):
+        payload = {
+            "schema": board.SESSION_SCHEMA,
+            "savedAt": __import__("time").time(),
+            "participants": [],
+            "topics": [
+                {
+                    "id": "t1",
+                    "headline": "Orphan",
+                    "details": "",
+                    "status": "done",
+                    "assignee": "a99",  # nobody survived the restore
+                }
+            ],
+        }
+        restored = board.State()
+        restored.restore_session(payload)
+        topic = _topic_by_headline(restored.snapshot(), "Orphan")
+        assert topic["status"] == "open"
+        assert topic["assignee"] is None
+
+    def test_write_is_throttled_but_forceable(self, state, path):
+        state.session_path = path
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+        state.persist(force=True)
+        first = board.load_session(path)
+        state.add_manual("Bob")  # broadcast() -> persist(), inside the interval
+        assert len(board.load_session(path)["participants"]) == len(
+            first["participants"]
+        )
+        state.persist(force=True)
+        assert len(board.load_session(path)["participants"]) == 2

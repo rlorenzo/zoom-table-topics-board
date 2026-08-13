@@ -1,5 +1,10 @@
 .venv/
 __pycache__/
+
+# Crash-recovery session file (see SESSION_FILE in board.py). Meeting-scoped
+# and machine-local; a clean exit deletes it.
+.board-session.json
+.board-session.json.tmp
 *.pyc
 .DS_Store
 .claude
