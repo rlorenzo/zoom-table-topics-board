@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import hashlib
 import json
 import os
 import queue
@@ -117,9 +116,15 @@ STATIC_FILES: dict[str, tuple[str, str]] = {
 # --- Name cleaning / filtering --------------------------------------------
 # Any comma-separated list of role words in trailing parens: "(host)",
 # "(host, me)", "(Co-host, me)", ... — Zoom mixes hyphenation freely.
-_ROLE = r"(?:co-?host|host|me|guest|you)"
+#
+# Every role word Zoom can append must be listed here, because a role this
+# regex fails to strip is not merely cosmetic: the leftover "(Panelist)" then
+# matches the "panelist" entry in DEFAULT_EXCLUDE and looks_like_name drops
+# that attendee from the roster entirely. Pronouns like "(he/him)" contain no
+# role word, so they never match and are preserved.
+_ROLE = r"(?:co-?host|host|me|guest|you|panelist|attendee)"
 ANNOT = re.compile(
-    rf"\s*\({_ROLE}(?:\s*,\s*{_ROLE})*\)\s*$",
+    rf"\s*\(\s*{_ROLE}(?:\s*,\s*{_ROLE})*\s*\)\s*$",
     re.IGNORECASE,
 )
 ROLEWORD = re.compile(r"\b(host|co-?host|guest|me|you)\b\s*$", re.IGNORECASE)
@@ -225,6 +230,27 @@ def looks_like_name(s: str, exclude_re: re.Pattern[str], min_len: int) -> bool:
 # --- Accessibility reading -------------------------------------------------
 TEXT_ROLES = {"AXStaticText", "AXCell", "AXButton", "AXRow", "AXTextField"}
 
+# Zoom tags every row in the participants panel with what that row *is*, which
+# is the only reliable way to tell someone in the meeting from someone merely
+# invited. The panel has two sections — "Joined (7)" and "Not joined (2)" — and
+# each invitee row carries their RSVP as a child text node, so a flattened read
+# yields "Emmanuel Arinze" immediately followed by "Accepted", both looking
+# exactly like names. The board picks its speaker at random, so that means
+# spotlighting someone who never showed up — or rolling "Accepted" as a person.
+#
+# Pruning the two `_Group` ids is only safe because they are section-header
+# rows *beside* the rows they title, not containers of them; the panel's table
+# is flat. Rows we keep are `ZMHCTableItemType_PANELIST`. If Zoom ever renames
+# these ids, pruning simply stops matching and the reader degrades to its old
+# behaviour rather than breaking; `--debug` will show the node count jump.
+SKIP_CELL_IDS = frozenset(
+    {
+        "ZMHCTableItemType_Invitee",  # a person who has NOT joined
+        "ZMHCTableItemType_Invitee_Group",  # the "Not joined (N)" header
+        "ZMHCTableItemType_PANELIST_Group",  # the "Joined (N)" header
+    }
+)
+
 # Zoom's chat panel has a recipient picker that mentions "participants",
 # so it can match the participant anchor regex. We reject anchors that
 # look like chat so the harvester doesn't slurp up chat-panel labels
@@ -301,6 +327,10 @@ def _collect_anchors(el: Any, pat: re.Pattern[str], found: list[Any]) -> None:
 
 def _collect_texts(el: Any, out: list[str]) -> None:
     def visit(node: Any) -> bool:
+        # Prune, don't just skip: an invitee's RSVP ("Accepted") hangs below
+        # the invitee row, so descending would harvest it anyway.
+        if str(_attr(node, "AXIdentifier") or "") in SKIP_CELL_IDS:
+            return True
         if _attr(node, "AXRole") in TEXT_ROLES:
             t = _node_text(node)
             if t:
@@ -349,9 +379,20 @@ def _read_zoom_participants_ax(
     pat = re.compile(args.anchor_regex, re.IGNORECASE)
     anchors: list[Any] = []
     _collect_anchors(app_el, pat, anchors)
-    roots = anchors if anchors else [app_el]
+    if not anchors:
+        # No participants panel anywhere in the tree. Harvesting the whole app
+        # instead would scrape Zoom's own chrome: every toolbar and chat-panel
+        # button ("History", "Create new", "Giphy", "Send") is an AXButton with
+        # a description, and AXButton is a text role — so the roster fills with
+        # the app's UI and the board can roll "Giphy" as the next speaker. An
+        # exclude list can never keep up with one vendor's button labels. No
+        # panel means no participants; the poller treats an empty read as
+        # "can't see the panel" and leaves the roster intact.
+        if args.debug:
+            sys.stderr.write("[ax] no participants panel found; reporting none\n")
+        return []
     raw: list[str] = []
-    for r in roots:
+    for r in anchors:
         _collect_texts(r, raw)
     if args.debug:
         sys.stderr.write(f"[ax] {len(anchors)} anchor(s), {len(raw)} raw nodes\n")
@@ -455,9 +496,14 @@ def _read_zoom_participants_uia(
     anchors: list[Any] = []
     for w in windows:
         _uia_collect_anchors(w, pat, anchors)
-    roots = anchors if anchors else windows
+    if not anchors:
+        # Same reasoning as the macOS reader: no panel means no participants,
+        # not "scrape the whole window".
+        if args.debug:
+            sys.stderr.write("[uia] no participants panel found; reporting none\n")
+        return []
     raw: list[str] = []
-    for r in roots:
+    for r in anchors:
         _uia_collect_texts(r, raw)
     if args.debug:
         sys.stderr.write(f"[uia] {len(anchors)} anchor(s), {len(raw)} raw nodes\n")
@@ -536,12 +582,27 @@ class State:
         self.demo = False  # True while the sample meeting is loaded (try-it mode)
         self.clients: set[queue.Queue[str]] = set()  # one Queue per SSE client
         self._topic_seq = 0  # monotonic, never reused even across reset
+        self._pid_seq = 0  # ditto, for participant ids (see _new_pid)
 
     # --- id helpers --------------------------------------------------------
-    @staticmethod
-    def _id(prefix: str, name: str) -> str:
-        h = hashlib.sha1(name.lower().encode(), usedforsecurity=False).hexdigest()[:12]
-        return prefix + h
+    def _new_pid(self, prefix: str) -> str:
+        """Mint a fresh participant id ("a" auto-read, "m" typed in by hand).
+
+        Deliberately NOT derived from the name. Zoom's panel is only a list of
+        display names, so hashing the name made the name the identity: two
+        people called "John Smith" collapsed onto one row, and renaming
+        yourself mid-meeting replaced your row with a stranger's — which on a
+        picker means one person can never be drawn and another gets drawn
+        twice after already speaking. The counter is never reset — not even by
+        _wipe(), which clears the roster for demo mode — so an id is never
+        reused and a stale client can't address a departed person's row.
+
+        Panel reads can't deliver duplicate names today (_filter_and_dedupe
+        collapses them first), so a second "John Smith" only ever arrives via
+        a manual add or a direct API call.
+        """
+        self._pid_seq += 1
+        return f"{prefix}{self._pid_seq:x}"
 
     def _new_topic_id(self) -> str:
         self._topic_seq += 1
@@ -672,8 +733,60 @@ class State:
     # --- participant mutations --------------------------------------------
     def add_manual(self, name: str) -> None:
         with self.lock:
-            self._upsert(self._id("m", name + str(time.time())), name, "manual")
+            self._upsert(self._new_pid("m"), name, "manual")
         self.broadcast()
+
+    def _auto_name_pool(self) -> dict[str, list[str]]:
+        """Existing auto-read participants, bucketed by lowercased name."""
+        pool: dict[str, list[str]] = {}
+        for pid, p in self.participants.items():
+            if p["source"] == "auto":
+                pool.setdefault(p["name"].lower(), []).append(pid)
+        return pool
+
+    def _vanished_present(self, claimed: set[str]) -> list[str]:
+        """Present auto-read participants who did not show up in this read."""
+        return [
+            pid
+            for pid, p in self.participants.items()
+            if p["source"] == "auto" and pid not in claimed and p["present"]
+        ]
+
+    def _apply_rename(self, matched: list[str | None]) -> None:
+        """Rebind the one unmatched name that is really a rename, in place.
+
+        Only a one-for-one swap counts: exactly one present auto-read
+        participant vanished from the panel and exactly one unfamiliar name
+        took their place, leaving a single possible pairing. With two or more
+        on either side the pairing would be a guess, and guessing wrong carries
+        somebody's "already spoke" flag onto the wrong person — so those are
+        left alone as an ordinary leave plus join.
+
+        Even the one-for-one case is a judgement call: within a single poll a
+        rename is indistinguishable from one person leaving as another joins.
+        Renames are much the commoner event at this granularity, so they win,
+        and being wrong costs one misplaced flag the host can clear.
+        """
+        vanished = self._vanished_present({p for p in matched if p is not None})
+        fresh = [i for i, pid in enumerate(matched) if pid is None]
+        if len(vanished) == 1 and len(fresh) == 1:
+            matched[fresh[0]] = vanished[0]
+
+    def _assign_auto_pids(self, names: list[str]) -> list[str]:
+        """Resolve each panel name to a stable participant id.
+
+        Names are matched against existing auto-read participants one-for-one
+        and each match is consumed, so repeated display names stay on separate
+        rows instead of collapsing. Whoever is left over is either a rename
+        (see _apply_rename) or genuinely new.
+        """
+        pool = self._auto_name_pool()
+        matched: list[str | None] = []
+        for nm in names:
+            bucket = pool.get(nm.lower())
+            matched.append(bucket.pop(0) if bucket else None)
+        self._apply_rename(matched)
+        return [pid or self._new_pid("a") for pid in matched]
 
     def _upsert_seen(
         self, people: list[Person], seen: set[str]
@@ -683,11 +796,13 @@ class State:
         (sync_participants) owns the lock."""
         host_pid: str | None = None
         changed = False
-        for entry in people:
-            nm = str(entry.get("name") or "").strip()
-            if not nm:
-                continue
-            pid = self._id("a", nm)
+        named = [
+            (entry, nm)
+            for entry in people
+            if (nm := str(entry.get("name") or "").strip())
+        ]
+        pids = self._assign_auto_pids([nm for _, nm in named])
+        for (entry, nm), pid in zip(named, pids, strict=True):
             seen.add(pid)
             if entry.get("is_host"):
                 host_pid = pid

@@ -4,6 +4,7 @@ import random
 
 import pytest
 
+import board
 from board import DEMO_PARTICIPANTS, DEMO_TOPICS, State
 
 
@@ -818,3 +819,192 @@ class TestSnapshot:
         snap2 = state.snapshot()
         assert snap2["participants"][0]["name"] == "Alice"
         assert snap2["topics"][0]["headline"] == "Topic"
+
+
+class TestParticipantIdentity:
+    """Participant ids must not be derived from the display name.
+
+    Zoom's panel is only a list of display names, so hashing the name made the
+    name the identity. On a board that picks a speaker at random the two
+    failure modes are both user-visible: a duplicate name means one of those
+    people can never be drawn, and a rename means someone who already spoke
+    loses their "answered" flag and can be drawn again.
+    """
+
+    def test_rename_keeps_the_same_row_and_its_answered_flag(self, state):
+        state.sync_participants([{"name": "Rex Lorenzo", "is_host": True}])
+        pid = _pid_of(state, "Rex Lorenzo")
+        state.participants[pid]["answered"] = True
+
+        state.sync_participants([{"name": "Rex L.", "is_host": True}])
+
+        assert _names(state.snapshot()) == ["Rex L."]
+        renamed = _by_name(state, "Rex L.")
+        assert renamed["id"] == pid
+        assert renamed["answered"] is True
+        assert renamed["present"] is True
+
+    def test_rename_leaves_the_other_participants_untouched(self, state):
+        state.sync_participants(
+            [{"name": "Alice", "is_host": False}, {"name": "Bob", "is_host": False}]
+        )
+        alice, bob = _pid_of(state, "Alice"), _pid_of(state, "Bob")
+
+        state.sync_participants(
+            [{"name": "Alice", "is_host": False}, {"name": "Bobby", "is_host": False}]
+        )
+
+        assert _pid_of(state, "Alice") == alice  # matched by name, not paired up
+        assert _pid_of(state, "Bobby") == bob
+        assert len(state.participants) == 2
+
+    def test_duplicate_display_names_stay_on_separate_rows(self, state):
+        people = [
+            {"name": "John Smith", "is_host": False},
+            {"name": "John Smith", "is_host": False},
+        ]
+        state.sync_participants(people)
+        assert _names(state.snapshot()) == ["John Smith", "John Smith"]
+        ids = [p["id"] for p in state.participants.values()]
+        assert len(set(ids)) == 2
+
+        # Both rows must survive the next poll rather than one being re-minted:
+        # each name is matched against the pool one-for-one and consumed.
+        state.sync_participants(people)
+        assert [p["id"] for p in state.participants.values()] == ids
+
+    def test_ambiguous_swap_is_a_leave_plus_join_not_a_rename(self, state):
+        # Two out and two in inside one poll leaves more than one possible
+        # pairing. Guessing wrong would carry someone's answered flag onto the
+        # wrong person, so we decline to guess.
+        state.sync_participants(
+            [{"name": "A", "is_host": False}, {"name": "B", "is_host": False}]
+        )
+        state.sync_participants(
+            [{"name": "C", "is_host": False}, {"name": "D", "is_host": False}]
+        )
+        assert _by_name(state, "A")["present"] is False
+        assert _by_name(state, "B")["present"] is False
+        assert _by_name(state, "C")["present"] is True
+        assert _by_name(state, "D")["present"] is True
+
+    def test_one_for_one_swap_is_read_as_a_rename_by_design(self, state):
+        """Pins the known, accepted cost of the one-for-one rule.
+
+        A departure and an unrelated arrival landing in the same poll is
+        indistinguishable from a rename: the panel yields display names only,
+        so both events look like "this name went, that name came". We take the
+        rename reading on purpose — a rename is atomic and *always* lands in
+        one poll, whereas this conflation needs two unrelated events inside
+        the same --interval window (5s by default).
+
+        The cost when we guess wrong is recorded here rather than left to the
+        docstring: the newcomer inherits the departed row. It is bounded and
+        host-correctable (reopen_topic clears answered, set_excluded toggles
+        the opt-out, remove() drops the row and the next poll mints a fresh
+        id). Flip these assertions only alongside a deliberate decision to
+        change the rule in State._apply_rename.
+        """
+        state.sync_participants(
+            [{"name": "Alice", "is_host": False}, {"name": "Bob", "is_host": False}]
+        )
+        bob = _pid_of(state, "Bob")
+        state.participants[bob]["answered"] = True
+        state.participants[bob]["excluded"] = True
+        state.selected_pid = bob
+
+        # Bob leaves and an unrelated Carol joins, both within one poll.
+        state.sync_participants(
+            [{"name": "Alice", "is_host": False}, {"name": "Carol", "is_host": False}]
+        )
+
+        carol = _by_name(state, "Carol")
+        assert carol["id"] == bob  # Bob's row, relabelled
+        assert carol["answered"] is True
+        assert carol["excluded"] is True
+        assert state.selected_pid == bob
+        # No ghost row is left behind: the roster still holds exactly two rows.
+        assert _names(state.snapshot()) == ["Alice", "Carol"]
+
+    def test_rename_does_not_consume_a_manual_row(self, state):
+        # Manual entries are never panel-tracked, so they must not be offered
+        # up as the "vanished" half of a rename pairing.
+        state.add_manual("Typed Person")
+        state.sync_participants([{"name": "Zoom Person", "is_host": False}])
+        state.sync_participants([{"name": "Zoom Person Renamed", "is_host": False}])
+
+        typed = _by_name(state, "Typed Person")
+        assert typed["source"] == "manual"
+        assert typed["present"] is True
+        assert _by_name(state, "Zoom Person Renamed")["source"] == "auto"
+
+    def test_a_departure_alone_is_not_read_as_a_rename(self, state):
+        # One person vanishes and nobody new appears: no pairing to make.
+        state.sync_participants(
+            [{"name": "Alice", "is_host": False}, {"name": "Bob", "is_host": False}]
+        )
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+        assert _by_name(state, "Bob")["present"] is False
+        assert _by_name(state, "Alice")["present"] is True
+
+    def test_arrival_after_a_recorded_departure_is_a_join(self, state):
+        # Only *present* people are rename candidates. Bob's departure was
+        # already banked a poll earlier, so Carol is a newcomer — pairing them
+        # would hand Bob's row to a stranger who merely arrived next.
+        state.sync_participants(
+            [{"name": "Alice", "is_host": False}, {"name": "Bob", "is_host": False}]
+        )
+        bob = _pid_of(state, "Bob")
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+        state.sync_participants(
+            [{"name": "Alice", "is_host": False}, {"name": "Carol", "is_host": False}]
+        )
+        assert _pid_of(state, "Carol") != bob
+        assert _by_name(state, "Bob")["present"] is False
+
+    def test_rejoining_under_the_same_name_reuses_the_row(self, state):
+        state.sync_participants(
+            [{"name": "Alice", "is_host": False}, {"name": "Bob", "is_host": False}]
+        )
+        pid = _pid_of(state, "Bob")
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+        state.sync_participants(
+            [{"name": "Alice", "is_host": False}, {"name": "Bob", "is_host": False}]
+        )
+        assert _pid_of(state, "Bob") == pid
+
+    def test_new_round_keeps_the_roster_and_its_ids(self, state):
+        # reset() is "new round": same people, cleared flags. Their ids must
+        # survive it, or every connected client's view would be invalidated.
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+        first = _pid_of(state, "Alice")
+        state.reset()
+        assert _pid_of(state, "Alice") == first
+
+    def test_ids_are_never_reused_after_the_roster_is_wiped(self, state):
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+        first = _pid_of(state, "Alice")
+        state.start_demo()  # wipes the roster
+        state.stop_demo()
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+        # A stale client must never address a departed person's row.
+        assert _pid_of(state, "Alice") != first
+
+    def test_ids_are_never_reused_after_a_removal(self, state):
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+        first = _pid_of(state, "Alice")
+        state.remove(first)
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+        assert _pid_of(state, "Alice") != first
+
+    def test_manual_adds_of_the_same_name_get_distinct_ids(self, state):
+        state.add_manual("Sam")
+        state.add_manual("Sam")
+        assert len(state.participants) == 2
+        assert _names(state.snapshot()) == ["Sam", "Sam"]
+
+    def test_id_prefix_records_where_the_row_came_from(self, state):
+        state.add_manual("Manny")
+        state.sync_participants([{"name": "Autumn", "is_host": False}])
+        assert _pid_of(state, "Manny").startswith("m")
+        assert _pid_of(state, "Autumn").startswith("a")
