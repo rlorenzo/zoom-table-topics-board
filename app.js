@@ -879,7 +879,13 @@ const CLICK_ACTIONS = {
     // *random* roll that happens to land on the same person still gets its
     // reveal.
     pendingManualPid = pid;
-    post("/api/select", { pid });
+    postOk("/api/select", { pid }).then((ok) => {
+      // A rejected select never becomes a selection, so nothing clears the
+      // marker — it would sit there until some later random roll happened to
+      // land on this same person, and then rob that draw of its reveal.
+      // Guarded on the id in case a second pick was started in the meantime.
+      if (!ok && pendingManualPid === pid) pendingManualPid = null;
+    });
   },
   "remove-p": (_tid, pid) => pid && post(`/api/participant/${pid}/remove`),
   exclude: (_tid, pid) => {

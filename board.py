@@ -576,8 +576,6 @@ SESSION_FILE = os.path.join(HERE, ".board-session.json")
 SESSION_SCHEMA = 1
 # Past this, a session is assumed to belong to an earlier meeting, not this one.
 SESSION_TTL_SECONDS = 4 * 60 * 60
-# Roster churn re-broadcasts constantly; don't write on every one.
-SESSION_WRITE_INTERVAL = 1.0
 
 
 class State:
@@ -607,7 +605,6 @@ class State:
         # None disables persistence entirely, which is the default so tests and
         # library use never touch the disk; main() opts the real server in.
         self.session_path: str | None = None
-        self._last_persist = 0.0
 
     # --- id helpers --------------------------------------------------------
     def _new_pid(self, prefix: str) -> str:
@@ -755,7 +752,7 @@ class State:
             with contextlib.suppress(Exception):
                 q.put_nowait(data)
         # Every mutation ends here, so this is the one place that catches them
-        # all. It self-throttles; see persist().
+        # all.
         self.persist()
 
     # --- session persistence ----------------------------------------------
@@ -785,22 +782,27 @@ class State:
                 "activeTopicId": self.active_topic_id,
             }
 
-    def persist(self, force: bool = False) -> None:
-        """Write the session file, at most every SESSION_WRITE_INTERVAL.
+    def persist(self) -> None:
+        """Write the session file. Called from broadcast(), so every mutation
+        lands on disk before the process can die on the next one.
 
-        Called from broadcast(), so it runs after every mutation. Failures are
-        swallowed: a read-only or full disk must not take down a meeting that is
-        otherwise working fine, and the file is only ever a convenience.
+        Deliberately unthrottled. A time-based throttle drops the *last* write
+        of a burst -- and the last mutation before a crash is exactly the one
+        recovery needs, typically the "done" that records who just spoke. The
+        cost it was guarding doesn't exist either: the poller only broadcasts
+        when the roster actually changed, so the remaining callers are host
+        actions, and this is a couple of KB next to the snapshot JSON
+        broadcast() already builds.
+
+        Failures are swallowed: a read-only or full disk must not take down a
+        meeting that is otherwise working fine, and the file is only ever a
+        convenience.
         """
         path = self.session_path
         if path is None or self.demo:
             # The demo is sample data; restoring it would be noise, and it must
             # never overwrite a real session the host is mid-way through.
             return
-        now = time.monotonic()
-        if not force and now - self._last_persist < SESSION_WRITE_INTERVAL:
-            return
-        self._last_persist = now
         payload = self.session_payload()
         with contextlib.suppress(OSError, TypeError, ValueError):
             # Write-then-rename so a crash mid-write can't leave a truncated

@@ -1034,14 +1034,14 @@ class TestSessionPersistence:
         state.select_participant(_pid_of(state, "Alice"))
         state.assign(tid)
         state.mark_done(tid)
-        state.persist(force=True)
+        state.persist()
         return state
 
     def test_persist_is_off_until_a_path_is_set(self, state, path):
         # The default must never touch the disk: library use and the test suite
         # both construct State freely.
         state.sync_participants([{"name": "Alice", "is_host": False}])
-        state.persist(force=True)
+        state.persist()
         assert board.load_session(path) is None
 
     def test_round_trips_who_has_already_gone(self, live, path, state):
@@ -1108,7 +1108,7 @@ class TestSessionPersistence:
     def test_demo_never_overwrites_a_real_session(self, live, path):
         before = board.load_session(path)
         live.start_demo()
-        live.persist(force=True)
+        live.persist()
         after = board.load_session(path)
         assert [p["name"] for p in after["participants"]] == [
             p["name"] for p in before["participants"]
@@ -1145,14 +1145,28 @@ class TestSessionPersistence:
         assert topic["status"] == "open"
         assert topic["assignee"] is None
 
-    def test_write_is_throttled_but_forceable(self, state, path):
+    def test_every_mutation_lands_on_disk_immediately(self, state, path):
+        """No throttle: the last write before a crash is the one that matters.
+
+        A time-based throttle drops the final write of a burst, so a "done"
+        recorded a fraction of a second after the previous mutation -- the
+        flag saying who just spoke -- would be missing from the session that
+        recovery reads back.
+        """
         state.session_path = path
         state.sync_participants([{"name": "Alice", "is_host": False}])
-        state.persist(force=True)
-        first = board.load_session(path)
-        state.add_manual("Bob")  # broadcast() -> persist(), inside the interval
-        assert len(board.load_session(path)["participants"]) == len(
-            first["participants"]
-        )
-        state.persist(force=True)
-        assert len(board.load_session(path)["participants"]) == 2
+        assert len(board.load_session(path)["participants"]) == 1
+
+        # Back-to-back, well inside any plausible throttle window.
+        state.add_manual("Bob")
+        state.add_manual("Carol")
+        assert len(board.load_session(path)["participants"]) == 3
+
+        # The mutation that matters most: marking the speaker done.
+        tid = state.add_topic("What is courage?")
+        state.select_participant(_pid_of(state, "Alice"))
+        state.assign(tid)
+        state.mark_done(tid)
+        saved = board.load_session(path)
+        assert [p["name"] for p in saved["participants"] if p["answered"]] == ["Alice"]
+        assert saved["topics"][0]["status"] == "done"
