@@ -19,12 +19,12 @@
     "check": "npm run lint && npm run validate:html && npm run test:cov && npm run deadcode"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.16",
-    "@vitest/coverage-v8": "4.1.9",
-    "fallow": "2.96.0",
-    "html-validate": "11.5.3",
-    "jsdom": "29.1.1",
-    "playwright": "^1.60.0",
-    "vitest": "4.1.9"
+    "@biomejs/biome": "2.5.8",
+    "@vitest/coverage-v8": "4.1.10",
+    "fallow": "3.15.0",
+    "html-validate": "11.6.2",
+    "jsdom": "30.0.1",
+    "playwright": "^1.62.1",
+    "vitest": "4.1.10"
   }
 }

@@ -12,6 +12,8 @@
 
   "duplicates": {
     // Small codebase: report every duplicate pair, not just widespread clones.
+    // Note that fallow 3 ignores test files by default, so this applies to
+    // source only — repeated arrange/assert blocks in *.test.js don't surface.
     "minOccurrences": 2
   },
 
