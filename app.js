@@ -162,6 +162,7 @@ function resetReveal() {
   $("stage").classList.remove("lit");
   lastSelectedId = null;
   revealActive = false;
+  settledId = null; // nothing is painted any more, so the next settle must run
 }
 
 // Monotonic render counter: a view transition applies its snapshot in an async
@@ -548,11 +549,22 @@ function renderPickChoices(s) {
   $("randomTopicBtn").disabled = s.topics.filter((t) => t.status === "open").length === 0;
 }
 
+// Whose name is currently painted in the settled state. settleReveal restarts
+// the "flourish" pop every time it runs, and renderPicking runs on every
+// snapshot — with the Zoom poller broadcasting every few seconds, re-settling
+// an already-settled name made the spotlight pulse on a timer for the whole
+// room. Tracked so a re-render only repaints when the selection actually
+// changed.
+let settledId = null;
+
 // A brand-new selection plays the shuffle reveal; re-rendering onto an
 // already-settled one (e.g. a topic was removed mid-pick) keeps the settled UI.
 function applyReveal(s, sel, isNew) {
-  if (isNew) startReveal(s, sel);
-  else if (!revealActive) settleReveal(sel);
+  if (isNew) {
+    startReveal(s, sel);
+  } else if (!revealActive && (sel ? sel.id : null) !== settledId) {
+    settleReveal(sel);
+  }
 }
 
 function renderPicking(s) {
@@ -652,6 +664,7 @@ function settleReveal(sel, burst = false) {
   banner.classList.add("show");
   choicesBox.classList.add("show");
   $("stage").classList.add("lit"); // bloom the spotlight on the settled name
+  settledId = sel ? sel.id : null;
   if (burst && sel) celebrateReveal();
 }
 
