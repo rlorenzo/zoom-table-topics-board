@@ -549,6 +549,11 @@ function renderPickChoices(s) {
   $("randomTopicBtn").disabled = s.topics.filter((t) => t.status === "open").length === 0;
 }
 
+// Set by the roster's "select" action: the id the host picked by hand, awaiting
+// the snapshot that confirms it. Cleared as soon as any selection lands, so it
+// can never leak onto a later random roll.
+let pendingManualPid = null;
+
 // Whose name is currently painted in the settled state. settleReveal restarts
 // the "flourish" pop every time it runs, and renderPicking runs on every
 // snapshot — with the Zoom poller broadcasting every few seconds, re-settling
@@ -559,10 +564,13 @@ let settledId = null;
 
 // A brand-new selection plays the shuffle reveal; re-rendering onto an
 // already-settled one (e.g. a topic was removed mid-pick) keeps the settled UI.
+// A hand-picked person skips the roll and lands settled immediately.
 function applyReveal(s, sel, isNew) {
-  if (isNew) {
+  const manual = sel && sel.id === pendingManualPid;
+  if (isNew) pendingManualPid = null;
+  if (isNew && !manual) {
     startReveal(s, sel);
-  } else if (!revealActive && (sel ? sel.id : null) !== settledId) {
+  } else if (isNew || (!revealActive && (sel ? sel.id : null) !== settledId)) {
     settleReveal(sel);
   }
 }
@@ -863,7 +871,16 @@ const CLICK_ACTIONS = {
   reopen: (tid) => tid && post(`/api/topic/${tid}/reopen`),
   "remove-topic": (tid) => tid && confirm("Remove this topic?") && post(`/api/topic/${tid}/remove`),
   edit: (tid) => tid && editTopic(tid),
-  select: (_tid, pid) => pid && post("/api/select", { pid }),
+  select: (_tid, pid) => {
+    if (!pid) return;
+    // The host chose this person deliberately, so there is no draw to dramatize
+    // — rolling through other names would be theatre for a decision already
+    // made, and it delays the room seeing who is up. Remembered by id so a
+    // *random* roll that happens to land on the same person still gets its
+    // reveal.
+    pendingManualPid = pid;
+    post("/api/select", { pid });
+  },
   "remove-p": (_tid, pid) => pid && post(`/api/participant/${pid}/remove`),
   exclude: (_tid, pid) => {
     if (!pid) return;
