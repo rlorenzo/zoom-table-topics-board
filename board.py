@@ -578,6 +578,11 @@ SESSION_SCHEMA = 1
 SESSION_TTL_SECONDS = 4 * 60 * 60
 
 
+def _session_tmp(path: str) -> str:
+    """The scratch file persist() renames from, unique per process."""
+    return f"{path}.{os.getpid()}.tmp"
+
+
 class State:
     """In-memory, per-meeting state. Ephemeral: nothing is persisted server-side
     except the crash-recovery session file (see SESSION_FILE), which a clean
@@ -605,6 +610,7 @@ class State:
         # None disables persistence entirely, which is the default so tests and
         # library use never touch the disk; main() opts the real server in.
         self.session_path: str | None = None
+        self._persist_lock = threading.Lock()  # serialises snapshot -> replace
 
     # --- id helpers --------------------------------------------------------
     def _new_pid(self, prefix: str) -> str:
@@ -803,14 +809,29 @@ class State:
             # The demo is sample data; restoring it would be noise, and it must
             # never overwrite a real session the host is mid-way through.
             return
-        payload = self.session_payload()
-        with contextlib.suppress(OSError, TypeError, ValueError):
-            # Write-then-rename so a crash mid-write can't leave a truncated
-            # file that the next launch would offer to restore.
-            tmp = f"{path}.tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump(payload, fh)
-            os.replace(tmp, path)
+        # Snapshot and write under one lock, so the file can't end up holding
+        # an older state than one already acknowledged. The server is threaded
+        # and the poller is a thread of its own, so two mutations really do
+        # land here at once; without this, two threads could interleave their
+        # writes, or take snapshots in one order and os.replace in the other,
+        # leaving recovery a state the host had already moved past.
+        #
+        # A separate lock, not self.lock: broadcast() is always called with
+        # self.lock released, so the order here is only ever _persist_lock ->
+        # self.lock (taken inside session_payload) and can't invert.
+        with self._persist_lock:
+            payload = self.session_payload()
+            with contextlib.suppress(OSError, TypeError, ValueError):
+                # Write-then-rename so a crash mid-write can't leave a
+                # truncated file that the next launch would offer to restore.
+                # The temp name carries the pid so a second board sharing this
+                # directory can't scribble through the same partial file --
+                # os.replace is atomic, so the worst case becomes a stale
+                # session rather than an unreadable one.
+                tmp = _session_tmp(path)
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump(payload, fh)
+                os.replace(tmp, path)
 
     def restore_session(self, payload: dict[str, object]) -> None:
         """Rebuild the roster and topics from a session file.
@@ -1323,7 +1344,7 @@ def load_session(
 
 def clear_session(path: str) -> None:
     """Remove the session file and any half-written temp beside it."""
-    for p in (path, f"{path}.tmp"):
+    for p in (path, _session_tmp(path)):
         with contextlib.suppress(OSError):
             os.remove(p)
 

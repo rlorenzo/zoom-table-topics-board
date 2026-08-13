@@ -1145,6 +1145,49 @@ class TestSessionPersistence:
         assert topic["status"] == "open"
         assert topic["assignee"] is None
 
+    def test_concurrent_mutations_leave_a_valid_and_current_session(self, state, path):
+        """The server is threaded and the poller is its own thread, so two
+        mutations really can reach persist() at once. Without serialising
+        snapshot->replace they can interleave their writes, or snapshot in one
+        order and replace in the other, leaving recovery holding a state the
+        host had already moved past -- or an unreadable file.
+        """
+        import threading as _threading
+
+        state.session_path = path
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+
+        barrier = _threading.Barrier(8)
+
+        def churn(i):
+            barrier.wait()  # maximise the overlap
+            for j in range(6):
+                state.add_manual(f"P{i}-{j}")
+
+        threads = [_threading.Thread(target=churn, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Readable at all: an interleaved write would be truncated or mixed.
+        saved = board.load_session(path)
+        assert saved is not None
+        # And current: every acknowledged add is present, none lost to a write
+        # that replaced a newer snapshot with an older one.
+        assert len(saved["participants"]) == 1 + 8 * 6
+        assert len(state.participants) == len(saved["participants"])
+
+    def test_no_scratch_file_is_left_behind(self, state, path):
+        state.session_path = path
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+        assert board.load_session(path) is not None
+        import glob as _glob
+
+        assert _glob.glob(f"{path}.*") == []
+        board.clear_session(path)
+        assert _glob.glob(f"{path}*") == []
+
     def test_every_mutation_lands_on_disk_immediately(self, state, path):
         """No throttle: the last write before a crash is the one that matters.
 
