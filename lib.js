@@ -6,11 +6,10 @@
 export const fmtTime = (ts) =>
   new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
+const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+
 export function escapeHtml(s) {
-  return String(s).replace(
-    /[&<>"']/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
-  );
+  return String(s).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
 }
 
 // ---- paste parsing -----------------------------------------------
@@ -71,11 +70,10 @@ export function eligibleNames(s) {
 // Exported so tests seed the same key the loader reads — a version bump here
 // can't silently leave tests writing to a dead key.
 export const TOPICS_STORAGE_KEY = "tabletopics.topics.v1";
-const LS_KEY = TOPICS_STORAGE_KEY;
 
 export function loadStoredTopics() {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(TOPICS_STORAGE_KEY);
     if (!raw) return [];
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return [];
@@ -93,7 +91,7 @@ export function loadStoredTopics() {
 export function saveStoredTopics(topics) {
   try {
     const slim = topics.map((t) => ({ headline: t.headline, details: t.details || "" }));
-    localStorage.setItem(LS_KEY, JSON.stringify(slim));
+    localStorage.setItem(TOPICS_STORAGE_KEY, JSON.stringify(slim));
   } catch {
     /* private mode / quota — non-fatal */
   }
@@ -101,7 +99,7 @@ export function saveStoredTopics(topics) {
 
 export function clearStoredTopics() {
   try {
-    localStorage.removeItem(LS_KEY);
+    localStorage.removeItem(TOPICS_STORAGE_KEY);
   } catch {
     /* ignore */
   }

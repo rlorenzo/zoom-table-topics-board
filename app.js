@@ -40,7 +40,9 @@ const ICON_PAUSE = `<svg class="ic" viewBox="0 0 16 16" fill="currentColor" aria
 const ICON_PLAY = `<svg class="ic" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3.9v8.2a1 1 0 0 0 1.52.85l6.83-4.1a1 1 0 0 0 0-1.7L6.52 3.05A1 1 0 0 0 5 3.9z"/></svg>`;
 
 const $ = (id) => document.getElementById(id);
-const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+// One MediaQueryList, read on every render; it tracks the OS setting live.
+const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)");
+const reduceMotion = () => REDUCED_MOTION.matches;
 
 // ---- API ---------------------------------------------------------
 // One app.js, two transports. With a backend present (uv run board.py) we POST
@@ -305,7 +307,7 @@ function cardTools(t, opts) {
 
 // Done/active cards get a reopen link — never in pick "choose" mode.
 function cardReopen(t, opts) {
-  if (opts.pickMode || (t.status !== "done" && t.status !== "active")) return "";
+  if (opts.pickMode || t.status === "open") return "";
   return `<button class="reopen-link" type="button" data-act="reopen" data-tid="${t.id}">${ICON_REOPEN}<span>Reopen</span></button>`;
 }
 
@@ -478,10 +480,8 @@ function clearTopicRoll() {
   }
   topicRolling = false;
   $("stage").classList.remove("rolling");
-  const rb = $("randomTopicBtn");
-  if (rb) rb.disabled = false;
-  const pa = $("pickAgainBtn");
-  if (pa) pa.disabled = false;
+  $("randomTopicBtn").disabled = false;
+  $("pickAgainBtn").disabled = false;
   document
     .querySelectorAll("#pickTopicsHost .card.flash, #pickTopicsHost .card.flash-final")
     .forEach((c) => {
@@ -546,7 +546,7 @@ function renderPickChoices(s) {
   $("pickTopicsHost").innerHTML = s.topics.length
     ? `<div class="topics">${choices}</div>`
     : `<div class="empty" style="width:100%">No topics to assign. Cancel and add some first.</div>`;
-  $("randomTopicBtn").disabled = s.topics.filter((t) => t.status === "open").length === 0;
+  $("randomTopicBtn").disabled = !s.topics.some((t) => t.status === "open");
 }
 
 // Set by the roster's "select" action: the id the host picked by hand, awaiting
@@ -956,20 +956,10 @@ document.addEventListener("keydown", (e) => {
 // ====================================================================
 //  LIVE STREAM
 // ====================================================================
-function eachEl(ids, fn) {
-  for (const id of ids) {
-    const el = $(id);
-    if (el) fn(el);
-  }
-}
-
+// The connection status is shown twice (board header and picking stage).
 function setLive(text, stale) {
-  eachEl(["live", "live2"], (el) => {
-    el.textContent = text;
-  });
-  eachEl(["liveDot", "liveDot2"], (el) => {
-    el.classList.toggle("stale", !!stale);
-  });
+  for (const id of ["live", "live2"]) $(id).textContent = text;
+  for (const id of ["liveDot", "liveDot2"]) $(id).classList.toggle("stale", !!stale);
 }
 
 // Server transport: today's exact behavior, just moved behind the interface.
