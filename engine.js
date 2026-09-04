@@ -73,19 +73,20 @@ export function createEngine() {
   }
 
   // --- snapshot --------------------------------------------------------
+  // The {id, name} pair the snapshot uses to point at a participant (topic
+  // assignee, current selection); null when the id is unset or unknown.
+  function participantRef(pid) {
+    const p = pid ? participants.get(pid) : null;
+    return p ? { id: p.id, name: p.name } : null;
+  }
+
   function topicView(t) {
-    let assignee = null;
-    const aid = t.assignee;
-    if (aid && participants.has(aid)) {
-      const ap = participants.get(aid);
-      assignee = { id: ap.id, name: ap.name };
-    }
     return {
       id: t.id,
       headline: t.headline,
       details: t.details,
       status: t.status,
-      assignee,
+      assignee: participantRef(t.assignee),
     };
   }
 
@@ -98,16 +99,11 @@ export function createEngine() {
     for (const tid of topicOrder) {
       if (topics.has(tid)) topicSnaps.push(topicView(topics.get(tid)));
     }
-    let selected = null;
-    if (selectedPid && participants.has(selectedPid)) {
-      const sp = participants.get(selectedPid);
-      selected = { id: sp.id, name: sp.name };
-    }
     return {
       startedAt,
       participants: ordered,
       topics: topicSnaps,
-      selected,
+      selected: participantRef(selectedPid),
       activeTopicId,
       demo,
     };
@@ -271,7 +267,7 @@ export function createEngine() {
   // empties the pool we fall back to allowing them again.
   function pick(excludePid) {
     let pool = eligiblePool(excludePid);
-    if (!pool.length && excludePid !== undefined && excludePid !== null) {
+    if (!pool.length && excludePid != null) {
       pool = eligiblePool(undefined);
     }
     let chosen;

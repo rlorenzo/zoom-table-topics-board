@@ -669,12 +669,6 @@ class State:
             self.order.append(pid)
         return True
 
-    def _current_host(self) -> str | None:
-        return next(
-            (pid for pid, p in self.participants.items() if p.get("is_host")),
-            None,
-        )
-
     def _settle_host(self, host_pid: str) -> bool:
         """Promote `host_pid` to sole host (most-recent wins) and pin to order[0]."""
         changed = False
@@ -692,32 +686,32 @@ class State:
     def _mark_missing_as_left(self, seen_pids: set[str], now: float) -> bool:
         """Mark auto-read participants no longer in the panel as left. Manual
         and demo entries are never panel-tracked, so they're left alone."""
-        changed = False
-        for pid, p in self.participants.items():
-            if p["source"] == "auto" and pid not in seen_pids and p["present"]:
-                p["present"] = False
-                p["leftTime"] = now
-                # A rolled-but-unassigned speaker who leaves the call shouldn't
-                # stay "selected" — clients would keep showing the picking view
-                # for someone no longer here.
-                if self.selected_pid == pid:
-                    self.selected_pid = None
-                changed = True
-        return changed
+        gone = self._vanished_present(seen_pids)
+        for pid in gone:
+            p = self.participants[pid]
+            p["present"] = False
+            p["leftTime"] = now
+            # A rolled-but-unassigned speaker who leaves the call shouldn't
+            # stay "selected" — clients would keep showing the picking view
+            # for someone no longer here.
+            if self.selected_pid == pid:
+                self.selected_pid = None
+        return bool(gone)
 
     # --- snapshot / broadcast ---------------------------------------------
+    def _participant_ref(self, pid: str | None) -> dict[str, str] | None:
+        """The {id, name} pair the snapshot uses to point at a participant (a
+        topic's assignee, the current selection); None if unset or unknown."""
+        p = self.participants.get(pid) if pid else None
+        return {"id": p["id"], "name": p["name"]} if p else None
+
     def _topic_view(self, t: Topic) -> dict[str, object]:
-        assignee: dict[str, str] | None = None
-        aid = t["assignee"]
-        if aid and aid in self.participants:
-            ap = self.participants[aid]
-            assignee = {"id": ap["id"], "name": ap["name"]}
         return {
             "id": t["id"],
             "headline": t["headline"],
             "details": t["details"],
             "status": t["status"],
-            "assignee": assignee,
+            "assignee": self._participant_ref(t["assignee"]),
         }
 
     def snapshot(self) -> dict[str, object]:
@@ -734,22 +728,21 @@ class State:
                 for tid in self.topic_order
                 if tid in self.topics
             ]
-            selected: dict[str, str] | None = None
-            sid = self.selected_pid
-            if sid and sid in self.participants:
-                sp = self.participants[sid]
-                selected = {"id": sp["id"], "name": sp["name"]}
             return {
                 "startedAt": self.started_at,
                 "participants": ordered,
                 "topics": topics,
-                "selected": selected,
+                "selected": self._participant_ref(self.selected_pid),
                 "activeTopicId": self.active_topic_id,
                 "demo": self.demo,
             }
 
+    def sse_frame(self) -> str:
+        """The current snapshot as one SSE `data:` event."""
+        return "data: " + json.dumps(self.snapshot()) + "\n\n"
+
     def broadcast(self) -> None:
-        data = "data: " + json.dumps(self.snapshot()) + "\n\n"
+        data = self.sse_frame()
         # Copy under the lock: handler threads add/discard clients concurrently,
         # so iterating the live set could raise "set changed size during iteration".
         with self.lock:
@@ -1446,13 +1439,15 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         pass  # quiet
 
-    def _json(self, code: int, obj: object) -> None:
-        body = json.dumps(obj).encode()
+    def _send(self, code: int, ctype: str, body: bytes) -> None:
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _json(self, code: int, obj: object) -> None:
+        self._send(code, "application/json", json.dumps(obj).encode())
 
     def _drain_body(self) -> bytes:
         """Read the request body exactly once, for every POST route. Leaving a
@@ -1497,11 +1492,7 @@ class Handler(BaseHTTPRequestHandler):
             body = _read_static(path)
         except FileNotFoundError:
             return self._json(missing[0], {"error": missing[1]})
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._send(200, ctype, body)
 
     def do_GET(self) -> None:
         # Route on the path component only, so a query string (e.g. a
@@ -1526,9 +1517,7 @@ class Handler(BaseHTTPRequestHandler):
             with STATE.lock:
                 STATE.clients.add(q)
             try:
-                self.wfile.write(
-                    ("data: " + json.dumps(STATE.snapshot()) + "\n\n").encode()
-                )
+                self.wfile.write(STATE.sse_frame().encode())
                 self.wfile.flush()
                 while True:
                     try:
