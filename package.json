@@ -25,6 +25,6 @@
     "html-validate": "11.6.2",
     "jsdom": "30.0.1",
     "playwright": "^1.62.1",
-    "vitest": "4.1.10"
+    "vitest": "5.0.0"
   }
 }
