@@ -329,11 +329,52 @@ class TestPostRouting:
             resp = conn.getresponse()
             assert resp.status == 200
             resp.read()
-            # The server hung up; reusing the socket fails instead of parsing
-            # the leftover body bytes as a new request.
-            with pytest.raises((http.client.RemoteDisconnected, ConnectionError)):
-                conn.request("POST", "/api/reset", body=b"{}")
-                conn.getresponse()
+            # The server hangs up after this response and says so, so the
+            # client will not reuse the socket and parse the leftover body
+            # bytes as a new request. (http.client honours the header by
+            # reconnecting transparently, so a raise cannot be asserted.)
+            assert resp.getheader("Connection") == "close"
+            assert resp.will_close
+        finally:
+            conn.close()
+
+    def test_negative_content_length_closes_the_connection(self, server):
+        # A negative Content-Length is malformed. If treated as "no body" the
+        # handler would leave any bytes the client still sends unread, which
+        # would desync the next keep-alive request -- so it must close too.
+        host = server.removeprefix("http://")
+        conn = http.client.HTTPConnection(host, timeout=5)
+        try:
+            conn.putrequest("POST", "/api/reset")
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", "-1")
+            conn.endheaders(message_body=b"{}")
+            resp = conn.getresponse()
+            assert resp.status == 200
+            resp.read()
+            assert resp.getheader("Connection") == "close"
+            assert resp.will_close
+        finally:
+            conn.close()
+
+    def test_chunked_transfer_encoding_closes_the_connection(self, server):
+        # Content-Length doesn't describe a chunked body. _drain_body only
+        # looks at Content-Length, so it must not read the (absent) length as
+        # "no body" here -- the real, framed body would then desync the next
+        # keep-alive request. Reject by closing instead.
+        host = server.removeprefix("http://")
+        conn = http.client.HTTPConnection(host, timeout=5)
+        try:
+            conn.putrequest("POST", "/api/reset")
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Transfer-Encoding", "chunked")
+            conn.endheaders()
+            conn.send(b"2\r\n{}\r\n0\r\n\r\n")
+            resp = conn.getresponse()
+            assert resp.status == 200
+            resp.read()
+            assert resp.getheader("Connection") == "close"
+            assert resp.will_close
         finally:
             conn.close()
 
@@ -500,6 +541,120 @@ class TestOriginGuard:
         assert code == 200
         assert body == {"ok": True}
 
+    def test_cross_origin_with_valid_host_post_is_rejected(self, server):
+        # A hostile page can't set its own Host header, but it can set
+        # Origin freely -- the guard must reject on Origin even when Host
+        # (set correctly by the real browser) would pass.
+        host = server.removeprefix("http://")
+        req = urllib.request.Request(
+            server + "/api/reset",
+            data=b"{}",
+            headers={
+                "Content-Type": "application/json",
+                "Host": host,
+                "Origin": "http://evil.example",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
+                code = resp.status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        assert code == 403
+
+
+def _with_host(url, method, host):
+    """Send `method` to `url` with an explicit (possibly forged) Host header."""
+    req = urllib.request.Request(
+        url,
+        data=b"{}" if method == "POST" else None,
+        headers={"Host": host},
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
+            return resp.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+class TestHostGuard:
+    def test_forged_host_rejected_on_get_root(self, server):
+        assert _with_host(server + "/", "GET", "evil.example") == 403
+
+    def test_forged_host_rejected_on_events(self, server):
+        assert _with_host(server + "/events", "GET", "evil.example") == 403
+
+    def test_forged_host_rejected_on_post(self, server):
+        assert _with_host(server + "/api/reset", "POST", "evil.example") == 403
+
+    def test_valid_localhost_host_and_origin_succeed(self, server):
+        host = server.removeprefix("http://")  # "127.0.0.1:<port>"
+        req = urllib.request.Request(
+            server + "/api/reset",
+            data=b"{}",
+            headers={
+                "Content-Type": "application/json",
+                "Host": host,
+                "Origin": "http://" + host,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
+            assert resp.status == 200
+
+    def test_valid_host_on_get_root_succeeds(self, server):
+        host = server.removeprefix("http://")
+        assert _with_host(server + "/", "GET", host) == 200
+
+    def test_host_with_wrong_port_rejected(self, server):
+        host = server.removeprefix("http://").split(":")[0]
+        assert _with_host(server + "/", "GET", f"{host}:1") == 403
+
+    def test_forged_host_on_get_closes_the_connection(self, server):
+        # A GET with a forged Host is rejected without reading a body, so the
+        # socket must not be kept alive -- otherwise any bytes the client
+        # still sends (or a body it attaches) could desync the next request.
+        host = server.removeprefix("http://")
+        conn = http.client.HTTPConnection(host, timeout=5)
+        try:
+            conn.putrequest("GET", "/", skip_host=True)
+            conn.putheader("Host", "evil.example")
+            conn.endheaders()
+            resp = conn.getresponse()
+            assert resp.status == 403
+            resp.read()
+            assert resp.getheader("Connection") == "close"
+            assert resp.will_close
+        finally:
+            conn.close()
+
+
+class TestBodySizeLimit:
+    def test_oversized_body_rejected(self, server):
+        req = urllib.request.Request(
+            server + "/api/topic",
+            data=b"{" + b'"headline": "' + b"x" * (65 * 1024) + b'"}',
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
+                code = resp.status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        assert code == 413
+
+    def test_overlong_headline_is_truncated_not_rejected(self, server):
+        code, body = _post(
+            server + "/api/topic", {"headline": "x" * 1000, "details": ""}
+        )
+        assert code == 200
+        tid = body["id"]
+        topic = next(t for t in STATE.snapshot()["topics"] if t["id"] == tid)
+        assert len(topic["headline"]) == 500
+
 
 class TestSSE:
     def test_events_endpoint_sends_initial_snapshot(self, server):
@@ -508,6 +663,7 @@ class TestSSE:
         with urllib.request.urlopen(server + "/events", timeout=5) as resp:  # nosec B310
             assert resp.status == 200
             assert resp.headers["Content-Type"] == "text/event-stream"
+            assert resp.headers["X-Frame-Options"] == "DENY"
             # The handler writes the initial snapshot immediately.
             line = resp.readline()
             assert line.startswith(b"data: ")
