@@ -40,8 +40,8 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterable
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, ClassVar, TypedDict
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
+from typing import Any, ClassVar, TypedDict, cast
 from urllib.parse import urlparse
 
 # --- Optional accessibility support (degrades gracefully) ------------------
@@ -576,6 +576,10 @@ SESSION_FILE = os.path.join(HERE, ".board-session.json")
 SESSION_SCHEMA = 1
 # Past this, a session is assumed to belong to an earlier meeting, not this one.
 SESSION_TTL_SECONDS = 4 * 60 * 60
+# Sane upper bound on any single free-text field (name, headline, details)
+# accepted from the API — nothing legitimate needs more, and it keeps one
+# oversized field from bloating every SSE broadcast and session-file write.
+MAX_TEXT_LEN = 500
 
 
 def _session_tmp(path: str) -> str:
@@ -642,6 +646,8 @@ class State:
         `source` records where the entry came from ("auto" | "manual" | "demo")
         so e.g. only auto-read people are marked left when the panel loses them.
         """
+        if name:
+            name = name[:MAX_TEXT_LEN]
         p = self.participants.get(pid)
         if p:
             changed = bool(
@@ -822,7 +828,22 @@ class State:
                 # os.replace is atomic, so the worst case becomes a stale
                 # session rather than an unreadable one.
                 tmp = _session_tmp(path)
-                with open(tmp, "w", encoding="utf-8") as fh:
+                # Create with 0600 up front (umask only ever clears bits, and
+                # none are set here for group/other), so the roster never sits
+                # on disk world- or group-readable even for the instant
+                # between write and permission fix-up. The mode passed to
+                # os.open only applies on creation though, so if a tmp file
+                # from an earlier, less careful run is still sitting there,
+                # fchmod pins it back down to 0600 regardless.
+                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                try:
+                    if hasattr(os, "fchmod"):  # not on Windows
+                        os.fchmod(fd, 0o600)
+                    fh = os.fdopen(fd, "w", encoding="utf-8")
+                except BaseException:
+                    os.close(fd)  # not yet owned by a file object -- close it ourselves
+                    raise
+                with fh:
                     json.dump(payload, fh)
                 os.replace(tmp, path)
 
@@ -860,7 +881,7 @@ class State:
         self, saved: dict[str, object], pid_map: dict[str, str]
     ) -> None:
         """Re-add one saved participant under a freshly minted id."""
-        name = str(saved.get("name") or "").strip()
+        name = str(saved.get("name") or "").strip()[:MAX_TEXT_LEN]
         if not name:
             return
         source = str(saved.get("source") or "manual")
@@ -892,7 +913,7 @@ class State:
         tid_map: dict[str, str],
     ) -> None:
         """Re-add one saved topic, remapping its assignee onto the new ids."""
-        headline = str(saved.get("headline") or "").strip()
+        headline = str(saved.get("headline") or "").strip()[:MAX_TEXT_LEN]
         if not headline:
             return
         tid = self._new_topic_id()
@@ -907,7 +928,7 @@ class State:
         self.topics[tid] = {
             "id": tid,
             "headline": headline,
-            "details": str(saved.get("details") or ""),
+            "details": str(saved.get("details") or "")[:MAX_TEXT_LEN],
             "status": status,
             "assignee": assignee,
         }
@@ -1047,8 +1068,8 @@ class State:
         tid = self._new_topic_id()
         self.topics[tid] = {
             "id": tid,
-            "headline": headline,
-            "details": details,
+            "headline": headline[:MAX_TEXT_LEN],
+            "details": details[:MAX_TEXT_LEN],
             "status": "open",
             "assignee": None,
         }
@@ -1097,8 +1118,8 @@ class State:
             t = self.topics.get(tid)
             if not t:
                 return False
-            t["headline"] = h
-            t["details"] = str(details or "").strip()
+            t["headline"] = h[:MAX_TEXT_LEN]
+            t["details"] = str(details or "").strip()[:MAX_TEXT_LEN]
         self.broadcast()
         return True
 
@@ -1435,6 +1456,12 @@ class Handler(BaseHTTPRequestHandler):
     _STATIC_POST: ClassVar[dict[str, Callable[[Handler], None]]]
     # The current POST's body, drained once by do_POST before dispatch.
     _body: bytes = b""
+    # Loopback hostnames a request may legitimately name us by. Anything else
+    # (e.g. a DNS-rebound "evil.example" that now resolves to 127.0.0.1) is
+    # rejected before routing — see _host_ok / _origin_ok.
+    _LOCAL_HOSTNAMES: ClassVar[set[str]] = {"localhost", "127.0.0.1", "::1"}
+    # Cap request bodies well below the payload sizes real board updates need.
+    MAX_BODY_BYTES: ClassVar[int] = 64 * 1024
 
     def log_message(self, format: str, *args: Any) -> None:
         pass  # quiet
@@ -1443,17 +1470,36 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "DENY")
+        if self.close_connection:
+            # The body was left unread and the socket closes after this
+            # response; say so, or an HTTP/1.1 client may reuse the socket.
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
     def _json(self, code: int, obj: object) -> None:
         self._send(code, "application/json", json.dumps(obj).encode())
 
-    def _drain_body(self) -> bytes:
+    def _drain_body(self) -> bytes | None:
         """Read the request body exactly once, for every POST route. Leaving a
         body unread would desync the next request on a keep-alive socket, so
         this runs up front in do_POST — handlers parse the stash via _read_json.
+
+        Returns None if the body exceeds MAX_BODY_BYTES; the caller responds
+        413 and leaves close_connection set so the unread bytes can't desync
+        the next request on this socket.
         """
+        transfer_encoding = self.headers.get("Transfer-Encoding", "")
+        if transfer_encoding and transfer_encoding.strip().lower() != "identity":
+            # Chunked (or any other) Transfer-Encoding means Content-Length
+            # doesn't describe the body -- reading nothing per below would
+            # leave the real, framed body unread and desync the next
+            # keep-alive request. Close instead of trying to decode it.
+            self.close_connection = True
+            return b""
         try:
             n = int(self.headers.get("Content-Length", 0))
         except ValueError:
@@ -1461,13 +1507,19 @@ class Handler(BaseHTTPRequestHandler):
             # close so they can't desync the next keep-alive request.
             self.close_connection = True
             return b""
-        if n <= 0:
+        if n < 0:
+            # A negative length is malformed; treat it like an unparsable
+            # header and close so any bytes the client still sends can't
+            # desync the next keep-alive request.
+            self.close_connection = True
             return b""
-        if n > 1024 * 1024:  # 1MB limit
+        if n == 0:
+            return b""
+        if n > self.MAX_BODY_BYTES:
             # Body is left unread; close the connection so the unconsumed
             # bytes can't desync the next request on this keep-alive socket.
             self.close_connection = True
-            return b""
+            return None
         return self.rfile.read(n)
 
     def _read_json(self) -> dict[str, Any]:
@@ -1477,15 +1529,44 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _local_netloc_ok(self, netloc: str) -> bool:
+        """True if `netloc` (a Host or Origin authority) names this server:
+        a loopback hostname, on the port we're actually bound to (or no port
+        when that port is 80, the scheme's default)."""
+        try:
+            parsed = urlparse(f"//{netloc}")
+            port = parsed.port
+        except ValueError:
+            return False
+        # Host/Origin never legitimately carry userinfo; "evil@localhost"
+        # must not parse down to "localhost".
+        if parsed.username is not None or parsed.password is not None:
+            return False
+        if (parsed.hostname or "").lower() not in self._LOCAL_HOSTNAMES:
+            return False
+        # self.server is a socketserver.BaseServer per the base class's
+        # typing, but we only ever run under HTTPServer (see QuietHTTPServer
+        # and the tests' ThreadingHTTPServer), both of which set server_port.
+        bound_port = cast(HTTPServer, self.server).server_port
+        return port == bound_port if port is not None else bound_port == 80
+
+    def _host_ok(self) -> bool:
+        """Reject requests whose Host header doesn't name this server. Without
+        this, DNS rebinding lets a hostile page (whose hostname re-resolves to
+        127.0.0.1) send a Host our own _origin_ok would then match against a
+        matching-but-also-hostile Origin — see _origin_ok."""
+        return self._local_netloc_ok(self.headers.get("Host", ""))
+
     def _origin_ok(self) -> bool:
         """CSRF guard for state-changing POSTs. A browser attaches an Origin
-        header to cross-site requests; reject any whose authority doesn't match
-        the Host we were reached on. Non-browser clients (curl, tests) send no
-        Origin and are allowed."""
+        header to cross-site requests; reject any that isn't this server,
+        checked the same way _host_ok checks Host (not by comparing Origin to
+        the request's own, equally attacker-controlled, Host header).
+        Non-browser clients (curl, tests) send no Origin and are allowed."""
         origin = self.headers.get("Origin")
         if not origin:
             return True
-        return urlparse(origin).netloc == self.headers.get("Host", "")
+        return self._local_netloc_ok(urlparse(origin).netloc)
 
     def _serve_file(self, path: str, ctype: str, missing: tuple[int, str]) -> None:
         try:
@@ -1495,6 +1576,12 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, ctype, body)
 
     def do_GET(self) -> None:
+        if not self._host_ok():
+            # Body (if any) is left unread; close so it can't desync a
+            # keep-alive socket that a rejected request never earned the
+            # right to reuse. Mirrors the do_POST invalid-Host path.
+            self.close_connection = True
+            return self._json(403, {"error": "invalid host"})
         # Route on the path component only, so a query string (e.g. a
         # cache-buster like /app.js?v=1) still matches the static allowlist.
         path = urlparse(self.path).path
@@ -1512,6 +1599,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Frame-Options", "DENY")
             self.end_headers()
             q: queue.Queue[str] = queue.Queue()
             with STATE.lock:
@@ -1539,10 +1629,18 @@ class Handler(BaseHTTPRequestHandler):
     PARTICIPANT_ROUTE = re.compile(r"^/api/participant/([^/]+)/(host|remove|exclude)$")
 
     def do_POST(self) -> None:
+        if not self._host_ok():
+            # Body is left unread; close so it can't desync a keep-alive
+            # socket that a rejected request never earned the right to reuse.
+            self.close_connection = True
+            return self._json(403, {"error": "invalid host"})
         # Drain the body up front so every route — including 403/404 responses
         # and handlers that ignore their body — leaves the keep-alive socket
         # positioned at the next request.
-        self._body = self._drain_body()
+        body = self._drain_body()
+        if body is None:
+            return self._json(413, {"error": "request body too large"})
+        self._body = body
         if not self._origin_ok():
             return self._json(403, {"error": "cross-origin request rejected"})
         # Route on the path component only, same as do_GET, so a query string
