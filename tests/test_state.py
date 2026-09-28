@@ -1,6 +1,8 @@
 """Tests for the State class in board.py."""
 
+import os
 import random
+import stat
 
 import pytest
 
@@ -1044,6 +1046,30 @@ class TestSessionPersistence:
         state.persist()
         assert board.load_session(path) is None
 
+    def test_session_file_is_not_group_or_world_readable(self, live, path):
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+        assert mode == 0o600
+
+    def test_persist_closes_fd_if_fdopen_fails(self, state, path, monkeypatch):
+        # os.fdopen() only takes ownership of the fd on success. If it raises,
+        # persist()'s own except block must close the still-raw fd itself, or
+        # it leaks silently (the OSError is swallowed by contextlib.suppress).
+        state.session_path = path
+        state.sync_participants([{"name": "Alice", "is_host": False}])
+
+        captured_fd = {}
+
+        def fake_fdopen(fd, *a, **kw):
+            captured_fd["fd"] = fd
+            raise OSError("fdopen boom")
+
+        monkeypatch.setattr(os, "fdopen", fake_fdopen)
+        state.persist()  # swallowed by contextlib.suppress; must not raise
+
+        assert captured_fd, "os.fdopen was never called"
+        with pytest.raises(OSError):
+            os.fstat(captured_fd["fd"])  # closed fds fail fstat
+
     def test_round_trips_who_has_already_gone(self, live, path, state):
         restored = board.State()
         payload = board.load_session(path)
@@ -1144,6 +1170,24 @@ class TestSessionPersistence:
         topic = _topic_by_headline(restored.snapshot(), "Orphan")
         assert topic["status"] == "open"
         assert topic["assignee"] is None
+
+    def test_oversized_saved_name_is_clamped_on_restore(self, path):
+        # A session file is trusted less than a live process, not more -- a
+        # hand-edited or otherwise oversized name must not bypass the same
+        # MAX_TEXT_LEN cap applied to values coming in over the API.
+        payload = {
+            "schema": board.SESSION_SCHEMA,
+            "savedAt": __import__("time").time(),
+            "participants": [
+                {"id": "a1", "name": "x" * (board.MAX_TEXT_LEN * 2), "source": "manual"}
+            ],
+            "topics": [],
+        }
+        restored = board.State()
+        restored.restore_session(payload)
+        name = _by_name(restored, "x" * board.MAX_TEXT_LEN)["name"]
+        assert name == "x" * board.MAX_TEXT_LEN
+        assert len(name) == board.MAX_TEXT_LEN
 
     def test_concurrent_mutations_leave_a_valid_and_current_session(self, state, path):
         """The server is threaded and the poller is its own thread, so two
