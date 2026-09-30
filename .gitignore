@@ -32,3 +32,4 @@ coverage/
 
 # agy (antigravity) scratch cache
 cache/
+.vitest/

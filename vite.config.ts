@@ -1,6 +1,17 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from "vite-plus";
 
 export default defineConfig({
+  // Same scope and style as the previous Biome setup: JS/CSS only, 100 cols, double quotes.
+  fmt: {
+    printWidth: 100,
+    ignorePatterns: ["**/*.{html,md,json,jsonc,yml,yaml,toml,py}"],
+  },
+  lint: {
+    // Biome "recommended" ~ Oxlint default (correctness) rules.
+    ignorePatterns: ["coverage/**", "docs/**"],
+    jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
+    rules: { "vite-plus/prefer-vite-plus-imports": "error" },
+  },
   test: {
     // lib.js uses localStorage, so the pure-logic tests run under jsdom.
     environment: "jsdom",

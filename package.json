@@ -2,29 +2,32 @@
   "name": "zoom-table-topics-board",
   "version": "1.0.0",
   "private": true,
-  "type": "module",
   "description": "Front-end assets and web tooling for the Table Topics board",
-  "engines": {
-    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
-  },
+  "type": "module",
   "scripts": {
-    "lint": "biome check .",
-    "format": "biome check --write .",
+    "lint": "vp lint",
+    "format": "vp fmt",
     "validate:html": "html-validate index.html",
-    "test": "vitest run",
-    "test:cov": "vitest run --coverage",
+    "test": "vp test run",
+    "test:cov": "vp test run --coverage",
     "deadcode": "fallow --skip health",
     "health": "fallow health",
     "record:demo": "node scripts/record-demo.mjs",
-    "check": "npm run lint && npm run validate:html && npm run test:cov && npm run deadcode"
+    "check": "npm run lint && npm run format:check && npm run validate:html && npm run test:cov && npm run deadcode",
+    "format:check": "vp fmt --check"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.8",
-    "@vitest/coverage-v8": "5.0.0",
+    "@vitest/coverage-v8": "5.0.1",
     "fallow": "3.15.0",
     "html-validate": "11.14.0",
     "jsdom": "30.0.1",
     "playwright": "^1.62.1",
-    "vitest": "5.0.0"
+    "vite-plus": "1.0.0"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0"
+  },
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   }
 }

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { createEngine } from "./engine.js";
 
 // Mirrors tests/test_state.py against the browser-side engine. The engine is
