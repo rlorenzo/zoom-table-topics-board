@@ -50,10 +50,10 @@ jobs:
       - name: pymarkdown
         run: uv run pymarkdown -d md013 scan README.md
 
-      # Web hooks (biome/html-validate/vitest/fallow) need node_modules, which
+      # Web hooks (vp-lint/vp-fmt/html-validate/vp-test/fallow) need node_modules, which
       # this Python job doesn't install — they run in the `web` job instead.
       - name: pre-commit (python hooks)
-        run: SKIP=biome,html-validate,vitest,fallow uv run pre-commit run --all-files --show-diff-on-failure
+        run: SKIP=vp-lint,vp-fmt,html-validate,vp-test,fallow uv run pre-commit run --all-files --show-diff-on-failure
 
   # Web tooling (HTML / CSS / JS), driven by package.json + the committed
   # lockfile. Node ships preinstalled on the runner; `npm ci` gives a
@@ -74,13 +74,16 @@ jobs:
       - name: Install web dev dependencies
         run: npm ci
 
-      - name: biome (js/css lint + format check)
+      - name: vp lint (oxlint)
         run: npm run lint
+
+      - name: vp fmt (oxfmt format check)
+        run: npm run format:check
 
       - name: html-validate (html structure / a11y)
         run: npm run validate:html
 
-      - name: vitest (unit tests + coverage)
+      - name: vp test (unit tests + coverage)
         run: npm run test:cov
 
       - name: fallow (dead code + duplication)

@@ -72,9 +72,15 @@ repos:
       # job via `npm run`; these hooks give the same checks locally. The CI
       # Python job skips them (SKIP=...) since it has no node_modules. See
       # docs/web-tooling.md.
-      - id: biome
-        name: biome (js/css lint + format)
-        entry: npx --no-install biome check --write --no-errors-on-unmatched
+      - id: vp-lint
+        name: vp lint (js oxlint)
+        entry: npx --no-install vp lint
+        language: system
+        types_or: [javascript, jsx, ts, tsx]
+
+      - id: vp-fmt
+        name: vp fmt (js/css format)
+        entry: npx --no-install vp fmt --no-error-on-unmatched-pattern
         language: system
         types_or: [javascript, jsx, ts, tsx, css]
 
@@ -84,9 +90,9 @@ repos:
         language: system
         types: [html]
 
-      - id: vitest
-        name: vitest (front-end unit tests)
-        entry: npx --no-install vitest run
+      - id: vp-test
+        name: vp test (front-end unit tests)
+        entry: npx --no-install vp test run
         language: system
         pass_filenames: false
         files: \.(js|mjs|cjs)$

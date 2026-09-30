@@ -164,7 +164,7 @@ Front-end checks and the demo recorder use Node:
 
 ```bash
 npm install
-npm test                          # vitest unit tests
+npm test                          # vp test (vitest) unit tests
 npm run check                     # lint + html-validate + coverage + dead code
 npm run record:demo               # rewrites docs/demo.webm from a scripted run
 ```
