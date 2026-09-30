@@ -24,7 +24,7 @@ assets (HTML/CSS/JS).
     uv run pre-commit install --hook-type pre-push
     ```
 
-    The second line installs the pre-push hooks (`pip-audit`, `vitest`,
+    The second line installs the pre-push hooks (`pip-audit`, `vp test`,
     `fallow`); the first installs the commit-stage hooks. Both are needed.
 
 ## Workflow
@@ -40,15 +40,15 @@ assets (HTML/CSS/JS).
     On the Python side this runs `ruff` (linting/formatting), `bandit` and
     `gitleaks` (security), `lizard` (complexity), `mypy` (strict types),
     `pylint` (duplicate code), `pytest`, and `pymarkdown`. On the web side it
-    runs `biome` (JS/CSS lint and format), `html-validate` (HTML structure and
-    accessibility), `vitest` (front-end tests), and `fallow` (dead code). See
+    runs `vp lint`/`vp fmt` (Oxlint and Oxfmt for JS/CSS), `html-validate` (HTML structure and
+    accessibility), `vp test` (front-end tests), and `fallow` (dead code). See
     [`docs/web-tooling.md`](docs/web-tooling.md) for the web setup.
 4. **Submit a Pull Request**.
 
 ## Guidelines
 
 - **Code Quality**: Ensure your code follows the existing style (Python checked
-  by `ruff`, front-end by `biome`).
+  by `ruff`, front-end by `vp lint`/`vp fmt`).
 - **Documentation**: Update `README.md` or `DESIGN.md` if your change adds or alters functionality.
 - **Accessibility**: This project prioritizes accessibility (keyboard navigation, ARIA, reduced motion). Ensure your changes do not degrade the experience for users with assistive technologies.
 - **Small PRs**: Favor small, focused PRs over large ones.

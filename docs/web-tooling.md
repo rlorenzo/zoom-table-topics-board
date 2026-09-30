@@ -27,13 +27,13 @@ from the request, so there's no traversal surface.
 
 | Tool | Covers |
 | --- | --- |
-| [Biome](https://biomejs.dev) | JS + CSS lint **and** format (one binary). |
-| [Vitest](https://vitest.dev) + jsdom | Unit tests for `lib.js` and `engine.js`, with v8 coverage. |
+| [Vite+](https://viteplus.dev) `vp lint` / `vp fmt` | Oxlint (JS lint) and Oxfmt (JS + CSS format). |
+| Vite+ `vp test` (Vitest) + jsdom | Unit tests for `lib.js` and `engine.js`, with v8 coverage. |
 | [fallow](https://docs.fallow.tools) | JS dead-code + duplication (and complexity, on demand). |
 | [html-validate](https://html-validate.org) | HTML structure + accessibility. |
 
-**oxlint** was intentionally skipped — JS/TS-only and lint-only, so Biome already
-covers its ground here.
+Oxlint does not lint CSS, so the old Biome CSS lint rules are not replaced; CSS is
+format-checked only.
 
 ## package.json, not npx
 
@@ -45,14 +45,15 @@ is not committed.
 ```bash
 npm install          # one-time (and after package.json changes)
 
-npm run lint         # biome check .          (lint + format check)
-npm run format       # biome check --write .  (fix + format)
+npm run lint         # vp lint                (Oxlint)
+npm run format       # vp fmt                 (Oxfmt, writes)
+npm run format:check # vp fmt --check
 npm run validate:html
-npm test             # vitest run
-npm run test:cov     # vitest run --coverage  (gated, see below)
+npm test             # vp test run
+npm run test:cov     # vp test run --coverage  (gated, see below)
 npm run deadcode     # fallow --skip health   (dead code + duplication)
 npm run health       # fallow health          (complexity/CRAP report, on demand)
-npm run check        # lint + html + test:cov + deadcode
+npm run check        # lint + format:check + html + test:cov + deadcode
 ```
 
 ## How it runs in CI and pre-commit
@@ -60,13 +61,13 @@ npm run check        # lint + html + test:cov + deadcode
 - **CI** has a dedicated `web` job: `npm ci`, then each check via its `npm run`
   script. The Python `lint` job skips the web hooks (`SKIP=...`) because it has
   no `node_modules`.
-- **pre-commit** runs biome + html-validate at commit time and vitest + fallow
+- **pre-commit** runs vp lint + vp fmt + html-validate at commit time and vp test + fallow
   at push time, using the local `node_modules` (so `npm install` is required,
   alongside `uv sync`).
 
 ## Coverage gate
 
-`vitest.config.js` gates `lib.js` and `engine.js` at a floor
+`vite.config.ts` (`test.coverage`) gates `lib.js` and `engine.js` at a floor
 (statements/functions/lines 90, branches 85). It's a regression guard, not a
 target — both are fully covered today. `app.js` is deliberately out of scope
 for unit tests: it's DOM/event wiring, exercised by running the app, not in
@@ -80,9 +81,6 @@ isolation.
 - **fallow's `health` (complexity/CRAP) is not gated**: `app.js` is intentionally
   untested DOM code, which inflates CRAP. The gate is scoped to the dead-code +
   duplication checks; `npm run health` gives the complexity report on demand.
-- **Biome CSS rules `noImportantStyles` and `noDescendingSpecificity` are off**:
-  the `!important` rules are the deliberate reduced-motion accessibility
-  overrides, and descending-specificity is noisy on hand-authored CSS.
 - **html-validate** relaxes a few opinionated rules (`void-style` off; inline
   style / implicit input type / aria-label misuse as warnings) so it passes on
   the current markup while still catching real structural breakage.
