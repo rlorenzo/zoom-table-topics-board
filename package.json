@@ -17,7 +17,7 @@
     "format:check": "vp fmt --check"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "5.0.1",
+    "@vitest/coverage-v8": "5.0.5",
     "fallow": "3.15.0",
     "html-validate": "11.14.0",
     "jsdom": "30.0.1",
